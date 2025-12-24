@@ -1,0 +1,119 @@
+#!规划 DSL 模板（你已有）
+version: 1.0
+description: >
+  Planning rules for generating BI DSL sequences.
+  Focus on breadth-first health scan before deep reasoning or drilldown.
+
+# =========================
+# Intent Classification
+# =========================
+intents:
+  status_check:
+    description: >
+      Quick health evaluation of a metric at a specific time point.
+      Typical questions: "昨日销量如何", "今天表现怎么样"
+    default_strategy: breadth_scan
+
+  trend_analysis:
+    description: >
+      Evaluate medium or long-term movement of a metric.
+    default_strategy: trend_scan
+
+  attribution_analysis:
+    description: >
+      Explain why a metric changed significantly.
+    default_strategy: decomposition
+
+# =========================
+# Planning Strategies
+# =========================
+strategies:
+  # ---------- 核心：广度扫描 ----------
+  breadth_scan:
+    description: >
+      Establish analytical context with minimal cost.
+      Used as the first step for most natural language BI questions.
+    constraints:
+      - no_drilldown
+      - low_latency
+      - parallelizable
+
+    dsl_sequence:
+      - id: baseline_query
+        tool: query
+        when:
+          metric_type: additive
+        parameters:
+          metric: '{{primary_metric}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Establish baseline value for the target metric.
+
+      - id: short_term_trend
+        tool: trend
+        parameters:
+          metric: '{{primary_metric}}'
+          time_grain: day
+          compare_type: mom
+          date_range: '{{target_date}}'
+        reasoning: >
+          Evaluate short-term momentum versus previous period.
+
+      - id: cycle_comparison
+        tool: trend
+        parameters:
+          metric: '{{primary_metric}}'
+          time_grain: day
+          compare_type: wow
+          date_range: '{{target_date}}'
+        reasoning: >
+          Check cyclical stability by comparing with the same period last cycle.
+
+      - id: anomaly_check
+        tool: trend
+        parameters:
+          metric: '{{primary_metric}}'
+          time_grain: day
+          compare_type: vs_avg
+          date_range: 'last_30_days'
+        reasoning: >
+          Check for anomalies by comparing performance against the 30-day average.
+
+      - id: structural_rollup
+        tool: rollup
+        parameters:
+          metric: '{{primary_metric}}'
+          dimension: '{{default_structure_dimension}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Surface structural composition and detect concentration or imbalance.
+
+# =========================
+# Metric & Dimension Hints
+# =========================
+defaults:
+  metrics:
+    sales:
+      primary_metric: 'Order Number 不同计数'
+      metric_type: additive
+
+  structure_dimensions:
+    sales:
+      - 车型分组
+      - 品牌
+      - 渠道
+
+# =========================
+# Hooks for AnalysisAgent
+# =========================
+analysis_hooks:
+  anomaly_detection:
+    description: >
+      Conditions that may trigger a reasoning loop or drilldown.
+    signals:
+      - type: low_volume
+        rule: value < historical_p10
+      - type: abnormal_change
+        rule: abs(mom_change) > threshold
+      - type: structure_shift
+        rule: top1_share > historical_avg + delta

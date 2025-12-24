@@ -1,0 +1,51 @@
+{
+  "time_periods": {
+    "CM0": {
+      "start": "2023-08-25",
+      "end": "2023-10-12"
+    },
+    "DM0": {
+      "start": "2024-04-08",
+      "end": "2024-05-13"
+    },
+    "CM1": {
+      "start": "2024-08-30",
+      "end": "2024-09-26"
+    },
+    "CM2": {
+      "start": "2025-08-15",
+      "end": "2025-09-10"
+    },
+    "DM1": {
+      "start": "2025-04-18",
+      "end": "2025-05-13"
+    },
+    "LS9": {
+      "start": "2025-11-04",
+      "end": "2025-11-12"
+    }
+  },
+  "battery_capacity": {
+    "52kwh": [
+      "新一代智己LS6 52 Max",
+      "新一代智己LS6 52 Max+",
+      "新一代智己LS6 52 Pro",
+      "智己LS9 52 Ultra"
+    ],
+    "66kwh": [
+      "新一代智己LS6 66 Max",
+      "新一代智己LS6 66 Max+",
+      "智己LS9 66 Ultra"
+    ],
+    "76kwh": ["新一代智己LS6 Max", "新一代智己LS6 Max+", "新一代智己LS6 Pro"],
+    "103kwh": ["新一代智己LS6 Ultra", "新一代智己LS6 Pro Max"]
+  },
+  "product_type_logic": {
+    "增程": "Product Name LIKE '%52%' OR Product Name LIKE '%66%'",
+    "纯电": "Product Name NOT LIKE '%52%' AND Product Name NOT LIKE '%66%'"
+  },
+  "model_series_mapping": {
+    "LS6": ["CM0", "CM1", "CM2"],
+    "L6": ["DM0", "DM1"]
+  }
+}
