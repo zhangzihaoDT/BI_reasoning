@@ -33,29 +33,29 @@ W52_copilot/
 
 ```mermaid
 graph TD
-    User[用户 (User)] -->|自然语言查询| Agent[PlanningAgent]
+    User["用户 (User)"] -->|"自然语言查询"| Agent[PlanningAgent]
 
-    subgraph Context_Loading [上下文加载]
+    subgraph Context_Loading ["上下文加载"]
         Schema[schema.md] -.-> Agent
         Tools[tool.md] -.-> Agent
         BizDef[business_definition.json] -.-> Agent
         Rules[planning_rules.yaml] -.-> Agent
     end
 
-    subgraph Reasoning_Process [推理过程]
-        Agent -->|1. 意图识别| Intent{匹配意图}
-        Intent -->|Status Check| Strat1[策略: Breadth Scan]
-        Intent -->|Trend Analysis| Strat2[策略: Trend Scan]
+    subgraph Reasoning_Process ["推理过程"]
+        Agent -->|"1. 意图识别"| Intent{"匹配意图"}
+        Intent -->|"Status Check"| Strat1["策略: Breadth Scan"]
+        Intent -->|"Trend Analysis"| Strat2["策略: Trend Scan"]
 
-        Strat1 -->|2. 策略加载| Steps[加载 DSL 模板步骤]
+        Strat1 -->|"2. 策略加载"| Steps["加载 DSL 模板步骤"]
 
-        Steps -->|3. 实体映射| Fill[填充参数]
-        Fill -->|解析 {{target_date}}| Date[时间推断]
-        Fill -->|解析 {{primary_metric}}| Metric[指标映射]
-        Fill -->|解析 Filter| Filter[业务规则过滤]
+        Steps -->|"3. 实体映射"| Fill["填充参数"]
+        Fill -->|"解析 {{target_date}}"| Date["时间推断"]
+        Fill -->|"解析 {{primary_metric}}"| Metric["指标映射"]
+        Fill -->|"解析 Filter"| Filter["业务规则过滤"]
     end
 
-    Fill -->|4. 生成计划| DSL[分析动作矩阵 (JSON DSL)]
+    Fill -->|"4. 生成计划"| DSL["分析动作矩阵 (JSON DSL)"]
 ```
 
 ## 4. 数据流 (Data Flow)
@@ -132,12 +132,14 @@ tools/*.py               -->  Atomic Tool Implementations
 ### 核心组件
 
 1.  **Execution State (`execution_state.py`)**: 维护执行过程中的上下文状态，包括：
+
     - `dsl_sequence`: 待执行的动作序列。
     - `current_step`: 当前执行指针。
     - `results`: 存储每一步工具的执行结果（支持后续步骤引用）。
     - `signals`: 运行时产生的信号（如异常检测触发的 drill-down 信号）。
 
 2.  **Tool Router (`router.py`)**: 负责将抽象的 DSL Step 分发给具体的 Tool 实现类。
+
     - 支持扩展新的工具只需注册到 Router，无需修改 Graph 逻辑。
 
 3.  **LangGraph Workflow**:
@@ -150,21 +152,21 @@ tools/*.py               -->  Atomic Tool Implementations
 graph LR
     NL[用户问题] --> Planning[PlanningAgent]
     Planning --> DSL[DSL Matrix]
-    
+
     DSL --> Graph[Execution Graph]
-    
+
     subgraph Execution_Loop [LangGraph Loop]
         Graph --> Step[Fetch Step i]
         Step --> Router[Tool Router]
         Router --> Query[QueryTool]
         Router --> Trend[TrendTool]
         Router --> Rollup[RollupTool]
-        
+
         Query & Trend & Rollup --> Result[Update State]
         Result --> Next{Has Next?}
         Next -- Yes --> Step
     end
-    
+
     Next -- No --> Final[Final Result]
 ```
 
