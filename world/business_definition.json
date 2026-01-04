@@ -41,8 +41,19 @@
     "103kwh": ["新一代智己LS6 Ultra", "新一代智己LS6 Pro Max"]
   },
   "product_type_logic": {
-    "增程": "Product Name LIKE '%52%' OR Product Name LIKE '%66%'",
-    "纯电": "Product Name NOT LIKE '%52%' AND Product Name NOT LIKE '%66%'"
+    "增程": "product_name LIKE '%52%' OR product_name LIKE '%66%'",
+    "纯电": "product_name NOT LIKE '%52%' AND product_name NOT LIKE '%66%'"
+  },
+  "series_group_logic": {
+    "CM2": "product_name LIKE '%新一代%' AND product_name LIKE '%LS6%'",
+    "CM1": "product_name LIKE '%全新%' AND product_name LIKE '%LS6%'",
+    "CM0": "product_name LIKE '%LS6%' AND product_name NOT LIKE '%全新%' AND product_name NOT LIKE '%新一代%'",
+    "DM1": "product_name LIKE '%全新%' AND product_name LIKE '%L6%'",
+    "DM0": "product_name LIKE '%L6%' AND product_name NOT LIKE '%全新%'",
+    "LS9": "product_name LIKE '%LS9%'",
+    "LS7": "product_name LIKE '%LS7%'",
+    "L7": "product_name LIKE '%L7%'",
+    "其他": "ELSE"
   },
   "model_series_mapping": {
     "LS6": ["CM0", "CM1", "CM2"],

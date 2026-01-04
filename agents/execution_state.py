@@ -5,4 +5,4 @@ class ExecutionState(TypedDict):
     dsl_sequence: List[Dict[str, Any]]
     current_step: int
     results: Dict[str, Any]
-    signals: List[str]
+    signals: List[Dict[str, Any]]

@@ -1,6 +1,6 @@
 # tools/query.py
 from tools.base import BaseTool
-
+from runtime.context import DataManager
 
 class QueryTool(BaseTool):
     name = "query"
@@ -10,14 +10,22 @@ class QueryTool(BaseTool):
 
     def execute(self, step: dict, state: dict):
         print(f"[QueryTool] executing: {step['id']}")
+        params = step.get("parameters", {})
+        date_range = params.get("date_range")
+        metric = params.get("metric")
 
-        # 👇 模拟一个异常信号
-        signals = []
-        if step["id"] == "second_query":
-            signals.append("abnormal_change")
+        dm = DataManager()
+        df = dm.filter_data(date_range)
+        
+        # Apply metric definition
+        if metric == 'sales' and 'lock_time' in df.columns:
+            df = df[df['lock_time'].notna()]
+        
+        # Default to count if metric is sales or unspecified
+        value = len(df)
 
         return {
-            "value": 123,
-            "metric": step["parameters"].get("metric"),
-            "signals": signals,
+            "value": value,
+            "metric": metric,
+            "signals": [],
         }

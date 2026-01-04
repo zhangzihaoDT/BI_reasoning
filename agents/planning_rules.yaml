@@ -88,18 +88,93 @@ strategies:
         reasoning: >
           Surface structural composition and detect concentration or imbalance.
 
+      - id: composition_share
+        tool: composition
+        parameters:
+          metric: '{{primary_metric}}'
+          dimension: '{{default_structure_dimension}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Compute share distribution by structure.
+
+      - id: pareto_scan
+        tool: pareto
+        parameters:
+          metric: '{{primary_metric}}'
+          dimension: '{{default_structure_dimension}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Identify key contributors via cumulative share.
+
+  trend_scan:
+    description: >
+      Analyze movement of a metric over time.
+    dsl_sequence:
+      - id: timeseries_trend
+        tool: trend
+        parameters:
+          metric: '{{primary_metric}}'
+          time_grain: day
+          compare_type: mom
+          date_range: 'last_30_days'
+        reasoning: >
+          Short-term momentum.
+
+      - id: timeseries_yoy
+        tool: trend
+        parameters:
+          metric: '{{primary_metric}}'
+          time_grain: month
+          compare_type: yoy
+          date_range: 'last_12_months'
+        reasoning: >
+          Year-over-year context.
+
+      - id: dual_axis_compare
+        tool: dual_axis
+        parameters:
+          left_metric: '{{primary_metric}}'
+          right_metric: '{{secondary_metric}}'
+          time_grain: week
+          date_range: 'last_12_weeks'
+        reasoning: >
+          Compare primary metric with a related metric.
+
+  decomposition:
+    description: >
+      Decompose overall metric into parts and ratios.
+    dsl_sequence:
+      - id: additive_decompose
+        tool: additive
+        parameters:
+          total_metric: '{{primary_metric}}'
+          components:
+            - '{{default_structure_dimension}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Break down totals by structure.
+
+      - id: ratio_decompose
+        tool: ratio
+        parameters:
+          numerator: '{{primary_metric}}'
+          denominator: '{{secondary_metric}}'
+          date_range: '{{target_date}}'
+        reasoning: >
+          Assess ratio relationship.
 # =========================
 # Metric & Dimension Hints
 # =========================
 defaults:
   metrics:
     sales:
-      primary_metric: 'Order Number 不同计数'
+      primary_metric: '锁单数（含有 locktime 的 order number 数）'
       metric_type: additive
+      secondary_metric: 'invoice_amount'
 
   structure_dimensions:
     sales:
-      - 车型分组
+      - series_group
       - 品牌
       - 渠道
 

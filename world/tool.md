@@ -65,3 +65,84 @@
   - `compare_type`: 比较类型 (yoy, mom, wow, vs_avg)
   - `date_range`: 时间范围
 - **Output**: 时间序列数据及增长率
+
+## 7. 占比分析 (Composition)
+
+- **Tool**: `composition`
+- **Desc**: 计算某维度下的占比结构，用于饼图或树形图展示。
+- **Params**:
+  - `dimension`: 分解维度 (e.g., series_group, city)
+  - `metric`: 指标 (e.g., order_count, sales)
+  - `date_range`: 时间范围
+  - `filters`: 过滤条件 (optional)
+- **Output**: 列表 {dimension, value, percent}
+
+## 8. 分布分析 (Distribution)
+
+### 8.1 直方图 (Histogram)
+
+- **Tool**: `histogram`
+- **Desc**: 展示数值型指标的分布情况。
+- **Params**:
+  - `metric`: 数值指标 (e.g., invoice_amount, age)
+  - `bins`: 分箱数量或自定义分箱 (e.g., 10 或 [0,100,500,1000])
+  - `range`: 数值范围 (optional)
+  - `filters`: 过滤条件 (optional)
+- **Output**: 分箱区间与计数列表
+
+### 8.2 箱线图 (Boxplot)
+
+- **Tool**: `boxplot`
+- **Desc**: 统计数值型变量的四分位分布，支持分组比较。
+- **Params**:
+  - `metric`: 数值指标
+  - `group_by`: 分组维度 (optional)
+  - `date_range`: 时间范围
+  - `filters`: 过滤条件 (optional)
+- **Output**: {min, q1, median, q3, max}（可按组输出）
+
+### 8.3 帕累托图 (Pareto)
+
+- **Tool**: `pareto`
+- **Desc**: 对维度进行排序并计算累计占比，用于识别关键少数。
+- **Params**:
+  - `dimension`: 分解维度
+  - `metric`: 指标
+  - `top_n`: 可选，限制前 N 项 (optional)
+  - `date_range`: 时间范围
+- **Output**: 排序列表及累计占比 {dimension, value, cumulative_percent}
+
+## 9. 相关性分析 (Correlation)
+
+### 9.1 散点图 (Scatter)
+
+- **Tool**: `scatter`
+- **Desc**: 展示两个数值指标的相关性关系。
+- **Params**:
+  - `x_metric`: 横轴指标
+  - `y_metric`: 纵轴指标
+  - `group_by`: 分组维度 (optional)
+  - `date_range`: 时间范围
+  - `filters`: 过滤条件 (optional)
+- **Output**: 点集 {x, y, group}
+
+### 9.2 双轴趋势 (Dual Axis)
+
+- **Tool**: `dual_axis`
+- **Desc**: 同一时间轴展示两个不同指标的趋势，便于对比。
+- **Params**:
+  - `left_metric`: 左轴指标
+  - `right_metric`: 右轴指标
+  - `time_grain`: 时间粒度
+  - `date_range`: 时间范围
+- **Output**: 两组时间序列数据 {time, left_value, right_value}
+
+## 10. 可视化映射建议 (Visualization Mapping)
+
+- 排序/排名 → `top_n` → 条形图（水平/垂直）
+- 趋势对比 → `trend` / `dual_axis` → 折线图（支持同比/环比/双轴）
+- 占比结构 → `composition` → 饼图 / 树形图（Treemap）
+- 文本表格 → `rollup` → 表格（维度-数值列表）
+- 分布形态 → `histogram` / `boxplot` → 直方图 / 箱线图
+- 关键少数 → `pareto` → 帕累托图（按累计占比排序）
+- 相关性探索 → `scatter` → 散点图（可按组着色）

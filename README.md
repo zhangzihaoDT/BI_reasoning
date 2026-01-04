@@ -20,6 +20,9 @@ W52_copilot/
 │   ├── planning_agent.py        # [核心] 规划智能体主程序。负责加载上下文、调用 LLM、生成 DSL。
 │   ├── planning_rules.yaml      # [核心] 规则引擎配置。定义了意图分类、分析策略模板 (如 breadth_scan)。
 │   └── planning_agent改进建议.md  # 优化记录文档。
+├── runtime/                     # [新增] 运行时环境
+│   ├── context.py               # 数据上下文管理器 (DataManager)
+│   └── signals.py               # 信号与异常检测逻辑
 ├── world/                       # 领域知识层 (World Model)
 │   ├── schema.md                # 数据模式定义。包含维度、指标、时间字段及计算口径。
 │   ├── tool.md                  # 工具接口定义。描述 query, trend, rollup 等原子分析能力。
@@ -169,6 +172,26 @@ graph LR
 
     Next -- No --> Final[Final Result]
 ```
+
+---
+
+## 7. 📅 今日成果总结 (2026-01-04) 运行时与数据接入 (Runtime & Data Access)
+
+为了支持真实的业务数据分析，系统实现了稳健的运行时环境：
+
+1.  **单例数据管理器 (Singleton DataManager)**
+
+    - 位于 `runtime/context.py`，确保大规模 Parquet 数据 (`order_full_data.parquet`) 仅加载一次。
+    - **T+1 时间逻辑**: 自动基于系统时间推断 "Yesterday"，并结合数据最大日期进行边界校验。
+    - **动态业务逻辑注入**: 在加载时实时计算 `series_group` 等衍生维度。
+
+2.  **增强型趋势分析 (Enhanced Trend Analysis)**
+
+    - `TrendTool` 实现了智能回溯查询。针对单点时间（如“昨日”）的查询，自动检索 T-1 和 T-7 数据以计算日环比 (DoD) 和周同比 (WoW)，解决了单点数据无法计算变化率的问题。
+
+3.  **统计异常检测 (Statistical Anomaly Detection)**
+    - 基于历史滑动窗口（如最近 30 天）计算均值与标准差。
+    - 使用 Z-Score 和变异系数 (CV) 判定数据波动是否属于正常范围，自动生成 `anomaly_decision` 信号。
 
 ---
 
