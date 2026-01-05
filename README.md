@@ -214,19 +214,19 @@ graph TD
     Start([Start: DSL Sequence])
 
     subgraph Status_Check [1. 状态评估]
-        S1[Baseline Query<br/>(Tool: Query)]
+        S1["Baseline Query<br/>(Tool: Query)"]
     end
 
     subgraph Trend_Analysis [2. 趋势与异动]
-        S2[Short-term Trend<br/>(MoM / DoD)]
-        S3[Cycle Comparison<br/>(WoW)]
-        S4[Anomaly Check<br/>(vs 30-day Avg)]
+        S2["Short-term Trend<br/>(MoM / DoD)"]
+        S3["Cycle Comparison<br/>(WoW)"]
+        S4["Anomaly Check<br/>(vs 30-day Avg)"]
     end
 
     subgraph Structure_Analysis [3. 结构洞察]
-        S5[Structural Rollup<br/>(by Series Group)]
-        S6[Composition Share<br/>(Contribution %)]
-        S7[Pareto Scan<br/>(80/20 Rule)]
+        S5["Structural Rollup<br/>(by Series Group)"]
+        S6["Composition Share<br/>(Contribution %)"]
+        S7["Pareto Scan<br/>(80/20 Rule)"]
     end
 
     End([End: Final Report])
