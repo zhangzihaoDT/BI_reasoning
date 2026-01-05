@@ -20,12 +20,22 @@ class AdditiveTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
+        
+        # Determine time column based on metric
+        check_metric = metric or params.get("total_metric")
+        time_col = 'order_create_date'
+        if check_metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+        elif check_metric in ['开票量']:
+            time_col = 'invoice_upload_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
         
         # Apply metric definition (check metric or total_metric)
-        check_metric = metric or params.get("total_metric")
-        if check_metric == 'sales' and 'lock_time' in df.columns:
+        if check_metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
+        elif check_metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+            df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
             
         total_val = len(df)
 
@@ -74,12 +84,25 @@ class RatioTool(BaseTool):
         metrics = params.get("metrics") or []
 
         dm = DataManager()
+        
+        # Determine time column based on metric (though Ratio tool handles multiple metrics, usually primary drives date filter)
+        # Defaulting to order_create_date as ratio usually implies a relationship over a common baseline (like orders created)
+        # But if specifically asking for "sales" (lock) ratio, maybe lock_time is better?
+        # Let's stick to order_create_date for Ratio unless strictly single metric 'sales'.
+        # Actually, for RatioTool, we often calculate rates (lock rate, delivery rate) on the base of Created Orders.
+        # So filtering by lock_time would be WRONG for "lock rate" (which is locks / created).
+        # Thus, we KEEP order_create_date as the time axis for RatioTool.
         df = dm.filter_data(date_range)
         
         # Note: CompositionTool usually breaks down the same metric
-        if metric == 'sales' and 'lock_time' in df.columns:
-            df = df[df['lock_time'].notna()]
-            
+        # Wait, this is RatioTool...
+        
+        # If metric is 'sales' (unlikely for RatioTool which calculates rates), but let's see.
+        # RatioTool doesn't usually take a single 'metric' param that filters the whole dataset.
+        # It takes 'metrics' list (e.g. ['lock_rate']).
+        
+        # So we do NOT apply sales filter here.
+        
         total = len(df)
         
         ratios = []
@@ -129,10 +152,20 @@ class CompositionTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
         
-        if metric == 'sales' and 'lock_time' in df.columns:
+        # Determine time column based on metric
+        time_col = 'order_create_date'
+        if metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+        elif metric in ['开票量']:
+            time_col = 'invoice_upload_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
+        
+        if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
+        elif metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+            df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
             
         total = len(df)
         
@@ -170,7 +203,15 @@ class ParetoTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
+        
+        # Determine time column based on metric
+        time_col = 'order_create_date'
+        if metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+        elif metric in ['开票量']:
+            time_col = 'invoice_upload_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
         total = len(df)
         
         ranked = []
@@ -208,36 +249,75 @@ class DualAxisTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
+        
+        # DualAxis is tricky because it involves TWO metrics potentially with different time axes.
+        # However, usually we align on a primary time axis (order_create_date) or the time axis of the left metric.
+        # If left_metric is sales, we might want to use lock_time as the axis.
+        # But right_metric might be something else.
+        # Simplification: Use order_create_date as the common timeline for now, 
+        # unless both imply lock_time.
+        # Or, we fetch full data and resample separately.
+        
+        # Let's fetch FULL data for the range (using broad filter if possible, or just all data and filter in memory)
+        # But filter_data applies date_range on ONE column.
+        # If we use order_create_date, we might miss orders created earlier but locked in range.
+        
+        # Better approach for DualAxis: Get all data for the broad period relative to TODAY, 
+        # then resample each metric on its own appropriate time column.
+        
+        # But filter_data is designed for single date_range.
+        # Let's try to infer a "safe" range. 
+        # If date_range is relative (last_12_weeks), we can calculate start date.
+        
+        # Actually, let's stick to order_create_date for the *Timeline Axis* of the chart.
+        # In BI, usually "Weekly Sales" chart uses the date the order was booked (locked) or created.
+        # If users want to see "Sales by Lock Date", the x-axis is Lock Date.
+        # If users want "Sales by Create Date", x-axis is Create Date.
+        
+        # Given "Sales" = "Locked Orders", the X-Axis should likely be Lock Time.
+        # If Left Metric is Sales, let's assume X-Axis is Lock Time.
+        
+        time_col = 'order_create_date'
+        if left_metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
         
         # Note: DualAxis might use different metrics for left/right
         # If left_metric is sales, apply filter for left series calculation
         
         series = []
         if not df.empty:
-            df = df.set_index('order_create_date')
+            base_df = df.copy()
             rule = 'W'
             if time_grain == 'day':
                 rule = 'D'
             elif time_grain == 'month':
                 rule = 'ME'
-                
-            resampled = df.resample(rule)
-            
+
+            resampled_all = base_df.set_index(time_col).resample(rule)
+                        
             # Left metric logic
-            if left_metric == 'sales':
-                 # Custom handling for sales = lock_time notna
-                 # We can't easily resample filtered and unfiltered in one pass without separate dataframes or columns
-                 # Simpler approach: calculate left series from filtered data
-                 
-                 # Create a copy for sales metric
-                 df_sales = df[df['lock_time'].notna()]
-                 left_series = df_sales.resample(rule).size()
+            if left_metric in ['sales', '锁单量']:
+                 df_left = base_df[base_df['lock_time'].notna()].set_index(time_col)
+                 left_series = df_left.resample(rule).size()
             else:
-                 left_series = resampled.size()
+                 left_series = resampled_all.size()
             
-            # Right metric = lock count (example)
-            right_series = resampled['lock_time'].count()
+            # Right metric = lock count (example) or something else
+            # If right metric is different, we might need to re-fetch or re-index?
+            # For now, assuming right metric can be calculated from the SAME dataset and SAME time axis.
+            # If right metric is "traffic", and we index by "lock_time", it might be weird.
+            # But usually Dual Axis compares correlated metrics on SAME time axis.
+            
+            if right_metric in ['sales', '锁单量']:
+                df_right = base_df[base_df['lock_time'].notna()].set_index(time_col)
+                right_series = df_right.resample(rule).size()
+            elif right_metric in ['开票量']:
+                df_right = base_df[base_df['invoice_upload_time'].notna() & base_df['lock_time'].notna()].set_index(time_col)
+                right_series = df_right.resample(rule).size()
+            else:
+                right_series = resampled_all.size()
             
             # Align indexes (use left_series index as base)
             for d in left_series.index:

@@ -170,7 +170,7 @@ defaults:
     sales:
       primary_metric: '锁单数（含有 locktime 的 order number 数）'
       metric_type: additive
-      secondary_metric: 'invoice_amount'
+      secondary_metric: '开票量（同时存在 invoice_upload_time 和 locktime 的订单数量）'
 
   structure_dimensions:
     sales:

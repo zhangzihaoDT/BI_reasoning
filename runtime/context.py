@@ -19,6 +19,10 @@ class DataManager:
             # Ensure date columns are datetime
             if 'order_create_date' in self.data.columns:
                 self.data['order_create_date'] = pd.to_datetime(self.data['order_create_date'])
+            if 'lock_time' in self.data.columns:
+                self.data['lock_time'] = pd.to_datetime(self.data['lock_time'])
+            if 'delivery_date' in self.data.columns:
+                self.data['delivery_date'] = pd.to_datetime(self.data['delivery_date'])
             
             self._apply_business_logic()
             print(f"Data loaded. Shape: {self.data.shape}")
@@ -55,14 +59,23 @@ class DataManager:
             self.load_data()
         return self.data
 
-    def filter_data(self, date_range: Optional[str] = None) -> pd.DataFrame:
+    def filter_data(self, date_range: Optional[str] = None, time_col: str = 'order_create_date') -> pd.DataFrame:
         df = self.get_data()
         if not date_range:
             return df
             
+        # Ensure the time column exists and we filter out NaT if we are using it as time axis
+        if time_col not in df.columns:
+            return pd.DataFrame()
+            
         # Use current system time as today
         today = pd.Timestamp.now().normalize()
-        max_data_date = df['order_create_date'].max()
+        # Use dataset max date based on the specific time column
+        # If time_col is lock_time, we should look at max lock_time? 
+        # Or should we still anchor 'today' relative to system time?
+        # The prompt implies system time.
+        # But max_data_date validation should be against the time_col.
+        max_data_date = df[time_col].max()
         
         if date_range == "yesterday":
             # For "yesterday", we might want just the previous day, or up to yesterday.
@@ -70,16 +83,16 @@ class DataManager:
             target_date = today - pd.Timedelta(days=1)
             
             # Validation: check if target date exists in dataset
-            if target_date > max_data_date:
-                print(f"Warning: Requesting data for {target_date.date()} but dataset max date is {max_data_date.date()}. Data might be incomplete or missing.")
+            if pd.isna(max_data_date) or target_date > max_data_date:
+                print(f"Warning: Requesting data for {target_date.date()} but dataset max date for {time_col} is {max_data_date}. Data might be incomplete or missing.")
             
             # Filter for that specific day
-            return df[df['order_create_date'].dt.date == target_date.date()]
+            return df[df[time_col].dt.date == target_date.date()]
         elif date_range == "last_30_days":
             start_date = today - pd.Timedelta(days=30)
-            return df[df['order_create_date'] >= start_date]
+            return df[df[time_col] >= start_date]
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
-            return df[df['order_create_date'] >= start_date]
+            return df[df[time_col] >= start_date]
             
         return df

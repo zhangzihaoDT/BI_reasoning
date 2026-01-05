@@ -21,7 +21,7 @@ W52_copilot/
 │   ├── planning_rules.yaml      # [核心] 规则引擎配置。定义了意图分类、分析策略模板 (如 breadth_scan)。
 │   └── planning_agent改进建议.md  # 优化记录文档。
 ├── runtime/                     # [新增] 运行时环境
-│   ├── context.py               # 数据上下文管理器 (DataManager)
+│   ├── context.py               # 数据上下文管理器 (DataManager) - 支持多时间轴 (Create/Lock/Delivery)
 │   └── signals.py               # 信号与异常检测逻辑
 ├── world/                       # 领域知识层 (World Model)
 │   ├── schema.md                # 数据模式定义。包含维度、指标、时间字段及计算口径。
@@ -196,3 +196,68 @@ graph LR
 ---
 
 这份文档总结了当前 W52 Copilot 的技术架构与核心价值，可作为后续开发迭代的基石。
+
+---
+
+## 8. 案例分析：昨日锁单量分析流 (Case Study: Yesterday Lock Analysis)
+
+本案例展示了系统如何处理“昨日销量如何”这一典型业务问题。
+脚本路径: `pipelines/yesterday_lock.py`
+
+### 分析逻辑流 (Reasoning Flow)
+
+该流程体现了 **Breadth Scan (广度扫描)** 策略：先看总数，再看趋势，最后看结构。
+
+```mermaid
+graph TD
+    %% Nodes
+    Start([Start: DSL Sequence])
+
+    subgraph Status_Check [1. 状态评估]
+        S1[Baseline Query<br/>(Tool: Query)]
+    end
+
+    subgraph Trend_Analysis [2. 趋势与异动]
+        S2[Short-term Trend<br/>(MoM / DoD)]
+        S3[Cycle Comparison<br/>(WoW)]
+        S4[Anomaly Check<br/>(vs 30-day Avg)]
+    end
+
+    subgraph Structure_Analysis [3. 结构洞察]
+        S5[Structural Rollup<br/>(by Series Group)]
+        S6[Composition Share<br/>(Contribution %)]
+        S7[Pareto Scan<br/>(80/20 Rule)]
+    end
+
+    End([End: Final Report])
+
+    %% Edges
+    Start --> S1
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+    S6 --> S7
+    S7 --> End
+
+    %% Styling
+    style S1 fill:#e3f2fd,stroke:#1565c0
+    style S2 fill:#fff3e0,stroke:#e65100
+    style S3 fill:#fff3e0,stroke:#e65100
+    style S4 fill:#ffebee,stroke:#c62828
+    style S5 fill:#e8f5e9,stroke:#2e7d32
+    style S6 fill:#e8f5e9,stroke:#2e7d32
+    style S7 fill:#e8f5e9,stroke:#2e7d32
+```
+
+### 关键步骤解析
+
+1.  **Baseline Query**: 获取昨日绝对值（锁单量）。
+2.  **Trend Analysis**:
+    - **MoM**: 环比变化，判断短期动能。
+    - **WoW**: 同比变化，排除周度周期性影响。
+    - **Anomaly**: 基于 30 天历史计算 Z-Score，自动标记异常。
+3.  **Structure Analysis**:
+    - 按 `series_group`（车系）拆解，识别主力车型。
+    - **Pareto**: 识别核心贡献源（二八定律）。

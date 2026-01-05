@@ -28,11 +28,21 @@ class TrendTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
+        
+        # Determine time column based on metric
+        time_col = 'order_create_date'
+        if metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+        elif metric in ['开票量']:
+            time_col = 'invoice_upload_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
 
         # Apply metric definition
-        if metric == 'sales' and 'lock_time' in df.columns:
+        if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
+        elif metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+            df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
 
         if step.get("id") == "anomaly_check":
             if df.empty:
@@ -44,8 +54,8 @@ class TrendTool(BaseTool):
                     "signals": [],
                 }
             
-            # Group by day to get daily stats
-            daily = df.groupby(df['order_create_date'].dt.date).size()
+            # Group by day to get daily stats (use time_col)
+            daily = df.groupby(df[time_col].dt.date).size()
             # Current value is the last point
             value = float(daily.iloc[-1]) if not daily.empty else 0.0
             # Mean and std of the period
@@ -71,9 +81,9 @@ class TrendTool(BaseTool):
             }
 
         # Resample
-        # Make sure index is datetime
-        df_sorted = df.sort_values('order_create_date')
-        df_sorted = df_sorted.set_index('order_create_date')
+        # Make sure index is datetime (use time_col)
+        df_sorted = df.sort_values(time_col)
+        df_sorted = df_sorted.set_index(time_col)
         
         rule = 'D'
         if time_grain == 'week':
@@ -104,13 +114,20 @@ class TrendTool(BaseTool):
             else: # Default to mom (day-over-day for daily grain)
                 compare_date = target_date - pd.Timedelta(days=1)
                 
-            # Fetch comparison data
+            # Fetch comparison data (using raw df from DataManager but manually filtering)
             full_df = dm.get_data()
-            prev_df = full_df[full_df['order_create_date'].dt.date == compare_date.date()]
+            
+            # Filter prev_df using time_col
+            if time_col in full_df.columns:
+                prev_df = full_df[full_df[time_col].dt.date == compare_date.date()]
+            else:
+                prev_df = pd.DataFrame()
             
             # Apply metric definition to prev_df
-            if metric == 'sales' and 'lock_time' in prev_df.columns:
+            if metric in ['sales', '锁单量'] and 'lock_time' in prev_df.columns:
                 prev_df = prev_df[prev_df['lock_time'].notna()]
+            elif metric in ['开票量'] and 'invoice_upload_time' in prev_df.columns and 'lock_time' in prev_df.columns:
+                prev_df = prev_df[prev_df['invoice_upload_time'].notna() & prev_df['lock_time'].notna()]
                 
             prev_val = len(prev_df)
             curr_val = len(df) # df is already filtered and metric-applied

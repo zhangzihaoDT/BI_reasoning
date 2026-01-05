@@ -18,11 +18,21 @@ class RollupTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
-        df = dm.filter_data(date_range)
+        
+        # Determine time column based on metric
+        time_col = 'order_create_date'
+        if metric in ['sales', '锁单量']:
+            time_col = 'lock_time'
+        elif metric in ['开票量']:
+            time_col = 'invoice_upload_time'
+            
+        df = dm.filter_data(date_range, time_col=time_col)
         
         # Apply metric definition
-        if metric == 'sales' and 'lock_time' in df.columns:
+        if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
+        elif metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+            df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
         
         rows: List[Dict[str, Any]] = []
         if dimension and dimension in df.columns:
