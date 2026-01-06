@@ -4,6 +4,11 @@
 场景：分析“昨日销量如何”。
 用途：调试 Execution Graph 或 演示标准分析流程。
 """
+import sys
+import os
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agents.execution_graph import build_execution_graph
 
 app = build_execution_graph()
