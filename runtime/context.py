@@ -1,6 +1,10 @@
 import pandas as pd
 from typing import Optional
 import datetime
+from pathlib import Path
+import glob
+import numpy as np
+import re
 
 class DataManager:
     _instance = None
@@ -10,6 +14,8 @@ class DataManager:
             cls._instance = super(DataManager, cls).__new__(cls)
             cls._instance.data = None
             cls._instance.data_path = "/Users/zihao_/Documents/coding/dataset/formatted/order_full_data.parquet"
+            cls._instance.assign_data = None
+            cls._instance.assign_path = None
         return cls._instance
 
     def load_data(self):
@@ -58,6 +64,81 @@ class DataManager:
         if self.data is None:
             self.load_data()
         return self.data
+    
+    def load_assign_data(self):
+        if self.assign_data is None:
+            pattern = "/Users/zihao*/Documents/coding/dataset/original/assign_data.csv"
+            matches = glob.glob(pattern)
+            if matches:
+                self.assign_path = matches[0]
+            else:
+                self.assign_path = None
+            if self.assign_path:
+                encodings = ['utf-8', 'utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be', 'gbk', 'latin1']
+                last_err = None
+                for enc in encodings:
+                    try:
+                        df = pd.read_csv(self.assign_path, encoding=enc)
+                        break
+                    except Exception as e:
+                        last_err = e
+                        df = None
+                if df is not None and df.shape[1] == 1:
+                    for enc in encodings:
+                        try:
+                            df = pd.read_csv(self.assign_path, encoding=enc, sep='\t', engine='python')
+                            break
+                        except Exception:
+                            pass
+                if df is None:
+                    raise last_err if last_err else RuntimeError("Failed to read assign_data.csv")
+                
+                def _normalize(s: str) -> str:
+                    s = str(s).replace('\ufeff', '')
+                    s = s.replace('\u00A0', ' ').replace('\u3000', ' ')
+                    s = s.strip()
+                    while '  ' in s:
+                        s = s.replace('  ', ' ')
+                    return s
+                df.columns = [_normalize(c) for c in df.columns]
+                
+                required_cols = [
+                    'Assign Time 年/月/日',
+                    '下发线索数',
+                    '下发线索当日试驾数',
+                    '下发线索 7 日试驾数',
+                    '下发线索 7 日锁单数',
+                    '下发线索 30日试驾数',
+                    '下发线索 30 日锁单数',
+                    '下发门店数'
+                ]
+                for c in required_cols:
+                    if c not in df.columns:
+                        raise ValueError(f"Missing required column: {c}")
+                def _parse_cn_date(val):
+                    if pd.isna(val):
+                        return pd.NaT
+                    s = str(val)
+                    m = re.match(r'(\d{4})年(\d{1,2})月(\d{1,2})日', s)
+                    if m:
+                        y, mo, d = m.groups()
+                        try:
+                            return pd.to_datetime(f"{int(y)}-{int(mo)}-{int(d)}", errors='coerce')
+                        except Exception:
+                            return pd.NaT
+                    # fallback: try direct to_datetime
+                    return pd.to_datetime(s, errors='coerce')
+                df['assign_date'] = df['Assign Time 年/月/日'].apply(_parse_cn_date)
+                for c in required_cols[1:]:
+                    df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+                self.assign_data = df
+            else:
+                self.assign_data = pd.DataFrame()
+    
+    def get_assign_data(self) -> pd.DataFrame:
+        if self.assign_data is None:
+            self.load_assign_data()
+        return self.assign_data
 
     def filter_data(self, date_range: Optional[str] = None, time_col: str = 'order_create_date') -> pd.DataFrame:
         df = self.get_data()
@@ -94,5 +175,58 @@ class DataManager:
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
-            
         return df
+    
+    def filter_assign_data(self, date_range: Optional[str] = None) -> pd.DataFrame:
+        df = self.get_assign_data()
+        if df.empty or not date_range:
+            return df
+        time_col = 'assign_date'
+        if time_col not in df.columns:
+            return pd.DataFrame()
+        today = pd.Timestamp.now().normalize()
+        max_data_date = df[time_col].max()
+        if date_range == "yesterday":
+            target_date = today - pd.Timedelta(days=1)
+            if pd.isna(max_data_date) or target_date > max_data_date:
+                pass
+            return df[df[time_col].dt.date == target_date.date()]
+        elif date_range == "last_30_days":
+            start_date = today - pd.Timedelta(days=30)
+            return df[df[time_col] >= start_date]
+        elif date_range == "last_7_days":
+            start_date = today - pd.Timedelta(days=7)
+            return df[df[time_col] >= start_date]
+        return df
+    
+    def compute_assign_rates(self, date_range: Optional[str] = None) -> dict:
+        df = self.filter_assign_data(date_range) if date_range else self.get_assign_data()
+        if df.empty:
+            return {
+                "rate_same_day_test_drive": 0.0,
+                "rate_7d_test_drive": 0.0,
+                "rate_7d_lock": 0.0,
+                "rate_30d_test_drive": 0.0,
+                "rate_30d_lock": 0.0,
+                "avg_daily_leads_per_store": 0.0,
+            }
+        leads = float(df['下发线索数'].sum())
+        same_day = float(df['下发线索当日试驾数'].sum())
+        d7_td = float(df['下发线索 7 日试驾数'].sum())
+        d7_lock = float(df['下发线索 7 日锁单数'].sum())
+        d30_td = float(df['下发线索 30日试驾数'].sum())
+        d30_lock = float(df['下发线索 30 日锁单数'].sum())
+        def _rate(n: float, d: float) -> float:
+            return float(n / d) if d and d > 0 else 0.0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            s = df['下发线索数'] / df['下发门店数']
+            s = s.replace([np.inf, -np.inf], np.nan)
+            avg_daily_leads_per_store = float(s.mean()) if len(s) > 0 else 0.0
+        return {
+            "rate_same_day_test_drive": _rate(same_day, leads),
+            "rate_7d_test_drive": _rate(d7_td, leads),
+            "rate_7d_lock": _rate(d7_lock, leads),
+            "rate_30d_test_drive": _rate(d30_td, leads),
+            "rate_30d_lock": _rate(d30_lock, leads),
+            "avg_daily_leads_per_store": avg_daily_leads_per_store,
+        }

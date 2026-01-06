@@ -4,6 +4,20 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 
 ## 数据集定义
 
+### A. 外部下发数据集 (Assign Data)
+
+- 路径: `assign_file = Path("/Users/zihao*/Documents/coding/dataset/original/assign_data.csv")`
+- 时间维度:
+  - `Assign Time 年/月/日`
+- 指标:
+  - `下发线索数`
+  - `下发线索当日试驾数`
+  - `下发线索 7 日试驾数`
+  - `下发线索 7 日锁单数`
+  - `下发线索 30日试驾数`
+  - `下发线索 30 日锁单数`
+  - `下发门店数`
+
 ### 1. 时间维度 (Time Dimensions)
 
 用于按时间段（日、周、月、年）进行趋势分析和筛选，字段来自源报表。
