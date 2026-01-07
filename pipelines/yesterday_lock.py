@@ -10,6 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.execution_graph import build_execution_graph
+from agents.suggestion_agent import SuggestionAgent
 
 app = build_execution_graph()
 
@@ -140,5 +141,15 @@ def generate_assessment(signals):
         print("   风险因子：")
         for r in reasons:
             print(f"   - {r}")
+            
+    if level in ["中", "高"]:
+        print("\n🤖 分析建议 (Suggestion Agent):")
+        agent = SuggestionAgent()
+        suggestions = agent.generate_suggestions(
+            risk_level=level,
+            risk_factors=reasons,
+            analysis_results=signals 
+        )
+        print(suggestions)
 
 generate_assessment(final_state["signals"])
