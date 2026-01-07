@@ -8,6 +8,7 @@ from tools.query import QueryTool
 from tools.trend import TrendTool
 from tools.rollup import RollupTool
 from tools.decompose import AdditiveTool, RatioTool, CompositionTool, ParetoTool, DualAxisTool
+from tools.distribution import HistogramTool
 from runtime.signals import evaluate_breadth_scan_and_plan
 
 
@@ -22,6 +23,7 @@ tool_router = ToolRouter(
         AdditiveTool(),
         RatioTool(),
         DualAxisTool(),
+        HistogramTool(),
     ]
 )
 

@@ -76,6 +76,16 @@ dsl_sequence = [
             "date_range": "yesterday",
         },
     },
+    {
+        "id": "distribution_analysis",
+        "tool": "histogram",
+        "parameters": {
+            "metric": "datediff('day',first_assign_time,lock_time)",
+            "date_range": "yesterday",
+            "compare_date_range": "last_30_days",
+            "bins": 30,
+        },
+    },
 ]
 
 initial_state = {
@@ -91,3 +101,44 @@ print("\nFinal results:")
 print(final_state["results"])
 print("\nSignals:")
 print(final_state["signals"])
+
+def generate_assessment(signals):
+    risk_score = 0
+    reasons = []
+
+    for signal in signals:
+        if signal.get('type') == 'anomaly_decision':
+            if signal.get('anomaly_detected'):
+                risk_score += 2
+                reasons.append(f"趋势异常: {signal.get('metric')} ({signal.get('flag')})")
+        
+        elif signal.get('type') == 'distribution_signal':
+            if signal.get('status') == 'abnormal':
+                risk_score += 2
+                reasons.append(f"分布偏移: {signal.get('metric')} (差异评分: {signal.get('score'):.2f})")
+            elif signal.get('status') == 'warning':
+                risk_score += 1
+                reasons.append(f"分布预警: {signal.get('metric')}")
+        
+        elif signal.get('type') == 'data_quality_signal':
+             if signal.get('status') == 'warning':
+                risk_score += 1
+                reasons.append(f"数据质量: {signal.get('message')}")
+
+    if risk_score == 0:
+        level = "低"
+        icon = "🟢"
+    elif risk_score <= 2:
+        level = "中"
+        icon = "🟡"
+    else:
+        level = "高"
+        icon = "🔴"
+
+    print(f"\n{icon} 综合评估：风险等级：{level}")
+    if reasons:
+        print("   风险因子：")
+        for r in reasons:
+            print(f"   - {r}")
+
+generate_assessment(final_state["signals"])

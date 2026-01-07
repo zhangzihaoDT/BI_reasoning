@@ -36,6 +36,8 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 - `approve_refund_time`: 审批退款时间
 - `first_touch_time`: 首次接触时间
 - `first_test_drive_time`: 首次试驾时间
+- `lead_assign_time_max`: 线索最大下发时间
+- `first_assign_time`: 首次下发时间
 
 ### 2. 可用指标 (Metrics)
 
@@ -46,6 +48,7 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 - **小订数**: `order_number` 计数 (条件: `intention_payment_time` 非空)
 - **开票金额**: `invoice_amount`
 - **年龄**: `age`
+- **试驾次数**: `td_countd`
 - **订单计数**: `order_number` 计数
 
 ### 3. 可用维度 (Dimensions)
@@ -85,6 +88,8 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 - `order_number`: 订单号
 - `order_type`: 订单类型
 - `main_lead_id`: 主线索 ID
+- `finance_product`: 金融产品
+- `final_payment_way`: 尾款支付方式
 
 ### 4. 业务规则 (Business Rules)
 
