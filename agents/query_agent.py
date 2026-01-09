@@ -149,6 +149,11 @@ class QueryAgent:
         elif ("男性" in q) or ("男" in q and "男女" not in q):
             filters.append({"field": "gender", "op": "=", "value": "男"})
 
+        if "增程" in q:
+            filters.append({"field": "product_type", "op": "=", "value": "增程"})
+        elif "纯电" in q:
+            filters.append({"field": "product_type", "op": "=", "value": "纯电"})
+
         tool = "rollup" if dimension else "query"
         parameters = {"metric": metric, "date_range": date_range}
         if filters:
@@ -199,9 +204,10 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 - filters:
   - If query contains model names like LS6/LS9/LS7/L7, use field="series" and op="in" with those names.
   - If query explicitly mentions a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他) together with "车型分组" or "series_group", use field="series_group".
+  - If query contains product type words like "增程" or "纯电", use field="product_type" with "=".
   - If query contains city/region/store/channel names, add corresponding filters using "=" when exact, otherwise use "contains".
 - rollup dimension allowed:
-  - series, product_name, series_group, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
+  - series, product_name, series_group, product_type, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
 
 **Examples:**
 User: "昨日锁单数"
@@ -218,6 +224,9 @@ User: "LS6,LS9 2025年12月分别锁单多少"
 
 User: "LS9 2025年12月锁单 按产品名称看各车型贡献"
 {{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"product_name"}}}}
+
+User: "2025年12月车型为 CM2 增程的锁单量?"
+{{"tool":"query","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"CM2"}},{{"field":"product_type","op":"=","value":"增程"}}]}}}}
 """
 
         if not self.api_key:

@@ -34,7 +34,6 @@ class DataManager:
             print(f"Data loaded. Shape: {self.data.shape}")
     
     def _apply_business_logic(self):
-        # Apply series_group logic
         def get_series_group(row):
             pname = str(row.get('product_name', ''))
             if '新一代' in pname and 'LS6' in pname:
@@ -55,9 +54,16 @@ class DataManager:
                 return 'L7'
             else:
                 return '其他'
-        
+
+        def get_product_type(row):
+            pname = str(row.get('product_name', ''))
+            if '52' in pname or '66' in pname:
+                return '增程'
+            return '纯电'
+
         if 'product_name' in self.data.columns:
             self.data['series_group'] = self.data.apply(get_series_group, axis=1)
+            self.data['product_type'] = self.data.apply(get_product_type, axis=1)
 
     
     def get_data(self) -> pd.DataFrame:
