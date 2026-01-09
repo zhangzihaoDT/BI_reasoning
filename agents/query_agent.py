@@ -115,6 +115,8 @@ class QueryAgent:
             dimension = "store_name"
         elif re.search(r"(按|分|各).*(渠道)", q):
             dimension = "first_middle_channel_name"
+        elif re.search(r"(按|分|各).*(产品|产品名称)", q):
+            dimension = "product_name"
         elif re.search(r"(按|分|各).*(车型|车型分组)", q):
             dimension = "series_group"
         elif re.search(r"(按|分|各).*(性别)", q):
@@ -125,14 +127,22 @@ class QueryAgent:
         filters = []
         try:
             business_def = json.loads(self.context.get("business_def") or "{}")
-            series_keys = list((business_def.get("series_group_logic") or {}).keys())
+            series_group_logic = business_def.get("series_group_logic") or {}
+            series_keys = list(series_group_logic.keys())
+            model_series_mapping = business_def.get("model_series_mapping") or {}
+            model_keys = list(model_series_mapping.keys())
         except Exception:
             series_keys = []
+            model_keys = []
 
-        for k in series_keys:
-            if k and k in q:
-                filters.append({"field": "series_group", "op": "=", "value": k})
-                break
+        matched_models = [m for m in model_keys if m and m in q]
+        if matched_models:
+            filters.append({"field": "series", "op": "in", "value": matched_models})
+        else:
+            for k in series_keys:
+                if k and k in q:
+                    filters.append({"field": "series_group", "op": "=", "value": k})
+                    break
 
         if ("女性" in q) or ("女" in q and "男女" not in q and "男女" not in q):
             filters.append({"field": "gender", "op": "=", "value": "女"})
@@ -177,7 +187,7 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 **Rules:**
 - Choose tool:
   - Use "query" when user asks for a single number.
-  - Use "rollup" when user asks for breakdown (contains "按/分/各" + a dimension).
+  - Use "rollup" when user asks for breakdown (contains "按/分/各/分别" or lists multiple values like "LS6,LS9").
 - metric must be one of: 锁单量/交付数/开票量/开票金额/小订数 (or sales).
 - date_range:
   - "昨日/昨天" -> "yesterday"
@@ -187,10 +197,11 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
   - "2025年12月1日" -> "2025-12-01"
   - default "yesterday" if absent
 - filters:
-  - If query contains a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他), add filter field=series_group.
+  - If query contains model names like LS6/LS9/LS7/L7, use field="series" and op="in" with those names.
+  - If query explicitly mentions a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他) together with "车型分组" or "series_group", use field="series_group".
   - If query contains city/region/store/channel names, add corresponding filters using "=" when exact, otherwise use "contains".
 - rollup dimension allowed:
-  - series_group, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
+  - series, product_name, series_group, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
 
 **Examples:**
 User: "昨日锁单数"
@@ -201,6 +212,12 @@ User: "LS9 2025年12月交付数"
 
 User: "LS9 2025年12月交付数 按城市"
 {{"tool":"rollup","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"store_city"}}}}
+
+User: "LS6,LS9 2025年12月分别锁单多少"
+{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series","op":"in","value":["LS6","LS9"]}}],"dimension":"series"}}}}
+
+User: "LS9 2025年12月锁单 按产品名称看各车型贡献"
+{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"product_name"}}}}
 """
 
         if not self.api_key:
