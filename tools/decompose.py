@@ -26,7 +26,7 @@ class AdditiveTool(BaseTool):
         time_col = 'order_create_date'
         if check_metric in ['sales', '锁单量']:
             time_col = 'lock_time'
-        elif check_metric in ['开票量']:
+        elif check_metric in ['开票量', '开票数']:
             time_col = 'invoice_upload_time'
             
         df = dm.filter_data(date_range, time_col=time_col)
@@ -34,7 +34,7 @@ class AdditiveTool(BaseTool):
         # Apply metric definition (check metric or total_metric)
         if check_metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
-        elif check_metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+        elif check_metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
             df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
             
         total_val = len(df)
@@ -157,14 +157,14 @@ class CompositionTool(BaseTool):
         time_col = 'order_create_date'
         if metric in ['sales', '锁单量']:
             time_col = 'lock_time'
-        elif metric in ['开票量']:
+        elif metric in ['开票量', '开票数']:
             time_col = 'invoice_upload_time'
             
         df = dm.filter_data(date_range, time_col=time_col)
         
         if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
-        elif metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+        elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
             df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
             
         total = len(df)
@@ -313,7 +313,7 @@ class DualAxisTool(BaseTool):
             if right_metric in ['sales', '锁单量']:
                 df_right = base_df[base_df['lock_time'].notna()].set_index(time_col)
                 right_series = df_right.resample(rule).size()
-            elif right_metric in ['开票量']:
+            elif right_metric in ['开票量', '开票数']:
                 df_right = base_df[base_df['invoice_upload_time'].notna() & base_df['lock_time'].notna()].set_index(time_col)
                 right_series = df_right.resample(rule).size()
             else:

@@ -216,7 +216,7 @@ class TrendTool(BaseTool):
         time_col = 'order_create_date'
         if metric in ['sales', '锁单量']:
             time_col = 'lock_time'
-        elif metric in ['开票量']:
+        elif metric in ['开票量', '开票数']:
             time_col = 'invoice_upload_time'
             
         df = dm.filter_data(date_range, time_col=time_col)
@@ -224,7 +224,7 @@ class TrendTool(BaseTool):
         # Apply metric definition
         if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
-        elif metric in ['开票量'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
+        elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
             df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
 
         if step.get("id") == "anomaly_check":
@@ -309,7 +309,7 @@ class TrendTool(BaseTool):
             # Apply metric definition to prev_df
             if metric in ['sales', '锁单量'] and 'lock_time' in prev_df.columns:
                 prev_df = prev_df[prev_df['lock_time'].notna()]
-            elif metric in ['开票量'] and 'invoice_upload_time' in prev_df.columns and 'lock_time' in prev_df.columns:
+            elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in prev_df.columns and 'lock_time' in prev_df.columns:
                 prev_df = prev_df[prev_df['invoice_upload_time'].notna() & prev_df['lock_time'].notna()]
                 
             prev_val = len(prev_df)

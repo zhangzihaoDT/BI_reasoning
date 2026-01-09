@@ -175,6 +175,19 @@ class DataManager:
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
+        
+        # Try to parse specific date formats
+        if date_range:
+            try:
+                # YYYY-MM (Month)
+                if re.match(r'^\d{4}-\d{2}$', date_range):
+                    return df[df[time_col].dt.strftime('%Y-%m') == date_range]
+                # YYYY-MM-DD (Day)
+                elif re.match(r'^\d{4}-\d{2}-\d{2}$', date_range):
+                    return df[df[time_col].dt.strftime('%Y-%m-%d') == date_range]
+            except Exception:
+                pass
+                
         return df
     
     def filter_assign_data(self, date_range: Optional[str] = None) -> pd.DataFrame:
