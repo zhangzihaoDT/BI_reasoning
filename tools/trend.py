@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import pandas as pd
+import re
 
 from tools.base import BaseTool
 from runtime.context import DataManager
@@ -28,6 +29,16 @@ class TrendTool(BaseTool):
         date_range = params.get("date_range")
 
         dm = DataManager()
+
+        def _parse_explicit_day(dr: Any) -> Optional[pd.Timestamp]:
+            if not isinstance(dr, str):
+                return None
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", dr):
+                return None
+            ts = pd.to_datetime(dr, errors="coerce")
+            if pd.isna(ts):
+                return None
+            return ts.normalize()
         
         assign_metric_map = {
             "assign_leads": "下发线索数",
@@ -78,6 +89,7 @@ class TrendTool(BaseTool):
             ]
             change = 0.0
             change_pct = 0.0
+            explicit_day = _parse_explicit_day(date_range)
             if date_range == "yesterday":
                 today = pd.Timestamp.now().normalize()
                 target_date = today - pd.Timedelta(days=1)
@@ -86,6 +98,24 @@ class TrendTool(BaseTool):
                 if time_col in full.columns and num_col in full.columns and den_col in full.columns:
                     curr_df = full[full[time_col].dt.date == target_date.date()]
                     prev_df = full[full[time_col].dt.date == compare_date.date()]
+                    curr_num = float(curr_df[num_col].sum())
+                    curr_den = float(curr_df[den_col].sum())
+                    prev_num = float(prev_df[num_col].sum())
+                    prev_den = float(prev_df[den_col].sum())
+                    curr_val = float(curr_num / curr_den) if curr_den else 0.0
+                    prev_val = float(prev_num / prev_den) if prev_den else 0.0
+                    change = curr_val - prev_val
+                    if prev_val != 0:
+                        change_pct = change / prev_val
+            elif explicit_day is not None:
+                target_date = explicit_day
+                compare_date = target_date - (
+                    pd.Timedelta(days=7) if compare_type == "wow" else pd.Timedelta(days=1)
+                )
+                full = dm.get_assign_data()
+                if time_col in full.columns and num_col in full.columns and den_col in full.columns:
+                    curr_df = full[full[time_col].dt.normalize() == target_date]
+                    prev_df = full[full[time_col].dt.normalize() == compare_date]
                     curr_num = float(curr_df[num_col].sum())
                     curr_den = float(curr_df[den_col].sum())
                     prev_num = float(prev_df[num_col].sum())
@@ -184,6 +214,7 @@ class TrendTool(BaseTool):
             ]
             change = 0.0
             change_pct = 0.0
+            explicit_day = _parse_explicit_day(date_range)
             if date_range == "yesterday":
                 today = pd.Timestamp.now().normalize()
                 target_date = today - pd.Timedelta(days=1)
@@ -195,6 +226,19 @@ class TrendTool(BaseTool):
                 change = float(curr_val - prev_val)
                 if prev_val != 0:
                     change_pct = change / prev_val
+            elif explicit_day is not None:
+                target_date = explicit_day
+                compare_date = target_date - (
+                    pd.Timedelta(days=7) if compare_type == "wow" else pd.Timedelta(days=1)
+                )
+                full_df = dm.get_assign_data()
+                if time_col in full_df.columns and target_col in full_df.columns:
+                    prev_df = full_df[full_df[time_col].dt.normalize() == compare_date]
+                    prev_val = float(prev_df[target_col].sum()) if not prev_df.empty else 0.0
+                    curr_val = float(full_df[full_df[time_col].dt.normalize() == target_date][target_col].sum())
+                    change = float(curr_val - prev_val)
+                    if prev_val != 0:
+                        change_pct = change / prev_val
             elif len(series) >= 2:
                 prev = series[-2].value
                 curr = series[-1].value

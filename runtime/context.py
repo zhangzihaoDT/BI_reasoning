@@ -18,6 +18,22 @@ class DataManager:
             cls._instance.assign_path = None
         return cls._instance
 
+    @staticmethod
+    def _parse_cn_date_static(val):
+        if pd.isna(val):
+            return pd.NaT
+        s = str(val)
+        # Try YYYY年M月D日
+        m = re.match(r'(\d{4})年(\d{1,2})月(\d{1,2})日', s)
+        if m:
+            y, mo, d = m.groups()
+            try:
+                return pd.to_datetime(f"{int(y)}-{int(mo)}-{int(d)}", errors='coerce')
+            except Exception:
+                return pd.NaT
+        # fallback: try direct to_datetime
+        return pd.to_datetime(s, errors='coerce')
+
     def load_data(self):
         if self.data is None:
             print(f"Loading data from {self.data_path}...")
@@ -29,6 +45,9 @@ class DataManager:
                 self.data['lock_time'] = pd.to_datetime(self.data['lock_time'])
             if 'delivery_date' in self.data.columns:
                 self.data['delivery_date'] = pd.to_datetime(self.data['delivery_date'])
+            if 'first_assign_time' in self.data.columns:
+                # Use custom parser for Chinese dates
+                self.data['first_assign_time'] = self.data['first_assign_time'].apply(self._parse_cn_date_static)
             
             self._apply_business_logic()
             print(f"Data loaded. Shape: {self.data.shape}")
@@ -121,20 +140,8 @@ class DataManager:
                 for c in required_cols:
                     if c not in df.columns:
                         raise ValueError(f"Missing required column: {c}")
-                def _parse_cn_date(val):
-                    if pd.isna(val):
-                        return pd.NaT
-                    s = str(val)
-                    m = re.match(r'(\d{4})年(\d{1,2})月(\d{1,2})日', s)
-                    if m:
-                        y, mo, d = m.groups()
-                        try:
-                            return pd.to_datetime(f"{int(y)}-{int(mo)}-{int(d)}", errors='coerce')
-                        except Exception:
-                            return pd.NaT
-                    # fallback: try direct to_datetime
-                    return pd.to_datetime(s, errors='coerce')
-                df['assign_date'] = df['Assign Time 年/月/日'].apply(_parse_cn_date)
+                
+                df['assign_date'] = df['Assign Time 年/月/日'].apply(self._parse_cn_date_static)
                 for c in required_cols[1:]:
                     df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
                 self.assign_data = df
@@ -184,6 +191,17 @@ class DataManager:
         
         # Try to parse specific date formats
         if date_range:
+            # Check for date range format: YYYY-MM-DD/YYYY-MM-DD
+            if '/' in date_range:
+                parts = date_range.split('/')
+                if len(parts) == 2:
+                    try:
+                        start = pd.to_datetime(parts[0]).normalize()
+                        end = pd.to_datetime(parts[1]).normalize()
+                        return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+                    except Exception:
+                        pass
+
             try:
                 # YYYY-MM (Month)
                 if re.match(r'^\d{4}-\d{2}$', date_range):
@@ -216,6 +234,21 @@ class DataManager:
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
+        try:
+            # Check for date range format: YYYY-MM-DD/YYYY-MM-DD
+            if '/' in str(date_range):
+                parts = str(date_range).split('/')
+                if len(parts) == 2:
+                    start = pd.to_datetime(parts[0]).normalize()
+                    end = pd.to_datetime(parts[1]).normalize()
+                    return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+
+            if re.match(r'^\d{4}-\d{2}$', str(date_range)):
+                return df[df[time_col].dt.strftime('%Y-%m') == str(date_range)]
+            if re.match(r'^\d{4}-\d{2}-\d{2}$', str(date_range)):
+                return df[df[time_col].dt.strftime('%Y-%m-%d') == str(date_range)]
+        except Exception:
+            pass
         return df
     
     def compute_assign_rates(self, date_range: Optional[str] = None) -> dict:
