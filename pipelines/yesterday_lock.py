@@ -221,7 +221,8 @@ def analyze_range(start_date: str, end_date: str):
         state = analyze_point(d_str)
         
         # Print concise result for each day
-        assessment = generate_assessment(state["signals"], d_str, verbose=True)
+        print(f"Processing {d_str}...", end="\r")
+        assessment = generate_assessment(state["signals"], d_str, verbose=False)
         trajectory.append(assessment)
         
     # Summary of trajectory

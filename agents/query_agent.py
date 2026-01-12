@@ -74,6 +74,99 @@ class QueryAgent:
         except Exception as e:
             return f"Error calling API: {str(e)}"
 
+    def run(self, query):
+        print(f"🤖 QueryAgent received: {query}")
+
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        system_prompt = f"""
+You are a Data Query Assistant. Your ONLY goal is to convert natural language into a tool call JSON for data querying.
+You are NOT an analyst. You do NOT answer questions directly. You ONLY output JSON (no markdown).
+
+**Context:**
+- Today's date: {today}
+- Schema:
+{self.context['schema']}
+- Business Definitions:
+{self.context['business_def']}
+
+**Output JSON Format (always):**
+{{
+  "tool": "query_or_rollup",
+  "parameters": {{
+    "metric": "metric_name",
+    "date_range": "date_range_string",
+    "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
+    "dimension": "dimension_for_rollup_optional",
+    "dimensions": ["dimension1","dimension2"]
+  }}
+}}
+
+**Rules:**
+- Choose tool:
+  - Use "query" when user asks for a single number.
+  - Use "rollup" when user asks for breakdown (contains "按/分/各/分别" or lists multiple values like "LS6,LS9").
+- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数 (or sales).
+- date_range:
+  - "昨日/昨天" -> "yesterday"
+  - "last 7 days" -> "last_7_days"
+  - "last 30 days" -> "last_30_days"
+  - "2025年12月" -> "2025-12"
+  - "2025年12月1日" -> "2025-12-01"
+  - default "yesterday" if absent
+- filters:
+  - If query contains model names like LS6/LS9/LS7/L7, use field="series" and op="in" with those names.
+  - If query explicitly mentions a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他) together with "车型分组" or "series_group", use field="series_group".
+  - If query contains product type words like "增程" or "纯电", use field="product_type" with "=".
+  - If query contains city/region/store/channel names, add corresponding filters using "=" when exact, otherwise use "contains".
+- rollup dimension allowed:
+  - series, product_name, series_group, product_type, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
+
+**Examples:**
+User: "昨日锁单数"
+{{"tool":"query","parameters":{{"metric":"锁单量","date_range":"yesterday"}}}}
+
+User: "LS9 2025年12月交付数"
+{{"tool":"query","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}]}}}}
+
+User: "LS9 2025年12月交付数 按城市"
+{{"tool":"rollup","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"store_city"}}}}
+
+User: "LS6,LS9 2025年12月分别锁单多少"
+{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series","op":"in","value":["LS6","LS9"]}}],"dimension":"series"}}}}
+
+User: "LS9 2025年12月锁单 按产品名称看各车型贡献"
+{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"product_name"}}}}
+
+User: "2025年12月车型为 CM2 增程的锁单量?"
+{{"tool":"query","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"CM2"}},{{"field":"product_type","op":"=","value":"增程"}}]}}}}
+"""
+
+        if not self.api_key:
+            extracted = self._heuristic_extract(query)
+        else:
+            llm_response = self._call_llm(system_prompt, query)
+            if isinstance(llm_response, str) and llm_response.startswith("Error"):
+                extracted = self._heuristic_extract(query)
+            else:
+                if "```json" in llm_response:
+                    llm_response = llm_response.split("```json")[1].split("```")[0].strip()
+                elif "```" in llm_response:
+                    llm_response = llm_response.split("```")[1].split("```")[0].strip()
+                try:
+                    extracted = json.loads(llm_response)
+                except json.JSONDecodeError:
+                    extracted = self._heuristic_extract(query)
+
+        tool_name = extracted.get("tool") or "query"
+        parameters = extracted.get("parameters") or {}
+        step = {"id": "query_action", "tool": tool_name, "parameters": parameters}
+
+        tool = RollupTool() if tool_name == "rollup" else QueryTool()
+        try:
+            return tool.execute(step, {})
+        except Exception as e:
+            return f"❌ Query Execution Failed: {str(e)}"
+
     def _heuristic_extract(self, query: str) -> dict:
         q = str(query or "").strip()
         q_no_space = re.sub(r"\s+", "", q)
@@ -161,98 +254,3 @@ class QueryAgent:
         if tool == "rollup":
             parameters["dimension"] = dimension
         return {"tool": tool, "parameters": parameters}
-
-    def run(self, query):
-        print(f"🤖 QueryAgent received: {query}")
-
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        system_prompt = f"""
-You are a Data Query Assistant. Your ONLY goal is to convert natural language into a tool call JSON for data querying.
-You are NOT an analyst. You do NOT answer questions directly. You ONLY output JSON (no markdown).
-
-**Context:**
-- Today's date: {today}
-- Schema:
-{self.context['schema']}
-- Business Definitions:
-{self.context['business_def']}
-
-**Output JSON Format (always):**
-{{
-  "tool": "query_or_rollup",
-  "parameters": {{
-    "metric": "metric_name",
-    "date_range": "date_range_string",
-    "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
-    "dimension": "dimension_for_rollup_optional",
-    "dimensions": ["dimension1","dimension2"]
-  }}
-}}
-
-**Rules:**
-- Choose tool:
-  - Use "query" when user asks for a single number.
-  - Use "rollup" when user asks for breakdown (contains "按/分/各/分别" or lists multiple values like "LS6,LS9").
-- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数 (or sales).
-- date_range:
-  - "昨日/昨天" -> "yesterday"
-  - "last 7 days" -> "last_7_days"
-  - "last 30 days" -> "last_30_days"
-  - "2025年12月" -> "2025-12"
-  - "2025年12月1日" -> "2025-12-01"
-  - default "yesterday" if absent
-- filters:
-  - If query contains model names like LS6/LS9/LS7/L7, use field="series" and op="in" with those names.
-  - If query explicitly mentions a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他) together with "车型分组" or "series_group", use field="series_group".
-  - If query contains product type words like "增程" or "纯电", use field="product_type" with "=".
-  - If query contains city/region/store/channel names, add corresponding filters using "=" when exact, otherwise use "contains".
-- rollup dimension allowed:
-  - series, product_name, series_group, product_type, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
-
-**Examples:**
-User: "昨日锁单数"
-{{"tool":"query","parameters":{{"metric":"锁单量","date_range":"yesterday"}}}}
-
-User: "LS9 2025年12月交付数"
-{{"tool":"query","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}]}}}}
-
-User: "LS9 2025年12月交付数 按城市"
-{{"tool":"rollup","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"store_city"}}}}
-
-User: "LS6,LS9 2025年12月分别锁单多少"
-{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series","op":"in","value":["LS6","LS9"]}}],"dimension":"series"}}}}
-
-User: "LS9 2025年12月锁单 按产品名称看各车型贡献"
-{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"product_name"}}}}
-
-User: "2025年12月车型为 CM2 增程的锁单量?"
-{{"tool":"query","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"CM2"}},{{"field":"product_type","op":"=","value":"增程"}}]}}}}
-"""
-
-        if not self.api_key:
-            extracted = self._heuristic_extract(query)
-        else:
-            llm_response = self._call_llm(system_prompt, query)
-            if isinstance(llm_response, str) and llm_response.startswith("Error"):
-                extracted = self._heuristic_extract(query)
-            else:
-                if "```json" in llm_response:
-                    llm_response = llm_response.split("```json")[1].split("```")[0].strip()
-                elif "```" in llm_response:
-                    llm_response = llm_response.split("```")[1].split("```")[0].strip()
-                try:
-                    extracted = json.loads(llm_response)
-                except json.JSONDecodeError:
-                    extracted = self._heuristic_extract(query)
-
-        print(f"📋 Extracted Parameters: {extracted}")
-
-        tool_name = extracted.get("tool") or "query"
-        parameters = extracted.get("parameters") or {}
-        step = {"id": "query_action", "tool": tool_name, "parameters": parameters}
-
-        tool = RollupTool() if tool_name == "rollup" else QueryTool()
-        try:
-            return tool.execute(step, {})
-        except Exception as e:
-            return f"❌ Query Execution Failed: {str(e)}"
