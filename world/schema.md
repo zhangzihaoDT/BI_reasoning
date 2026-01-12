@@ -44,8 +44,8 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 用于计算总和、平均值、计数等数值指标，字段名与数据源一致。
 
 - **锁单量**: `order_number` 计数 (条件: `lock_time` 非空)
-- **交付数**: `order_number` 计数 (条件: `lock_time` AND `delivery_date` 非空)
-- **开票数**: `order_number` 计数 (条件: `lock_time` AND `invoice_upload_time` 非空)
+- **交付数**: `order_number` 计数 (条件: `delivery_date` 非空)
+- **开票数**: `order_number` 计数 (条件: `invoice_upload_time` 非空)
 - **小订数**: `order_number` 计数 (条件: `intention_payment_time` 非空)
 - **开票金额**: `invoice_amount`
 - **年龄**: `age`

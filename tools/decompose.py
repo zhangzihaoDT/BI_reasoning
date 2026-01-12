@@ -34,8 +34,8 @@ class AdditiveTool(BaseTool):
         # Apply metric definition (check metric or total_metric)
         if check_metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
-        elif check_metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
-            df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
+        elif check_metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns:
+            df = df[df['invoice_upload_time'].notna()]
             
         total_val = len(df)
 

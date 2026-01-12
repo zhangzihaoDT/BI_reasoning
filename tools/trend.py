@@ -353,8 +353,8 @@ class TrendTool(BaseTool):
             # Apply metric definition to prev_df
             if metric in ['sales', '锁单量'] and 'lock_time' in prev_df.columns:
                 prev_df = prev_df[prev_df['lock_time'].notna()]
-            elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in prev_df.columns and 'lock_time' in prev_df.columns:
-                prev_df = prev_df[prev_df['invoice_upload_time'].notna() & prev_df['lock_time'].notna()]
+            elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in prev_df.columns:
+                prev_df = prev_df[prev_df['invoice_upload_time'].notna()]
                 
             prev_val = len(prev_df)
             curr_val = len(df) # df is already filtered and metric-applied

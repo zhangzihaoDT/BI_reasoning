@@ -79,11 +79,11 @@ class QueryTool(BaseTool):
         if metric in ["sales", "锁单量", "锁单数"] and "lock_time" in df.columns:
             df = df[df["lock_time"].notna()]
         elif metric in ["交付数", "交付量"]:
-            if "lock_time" in df.columns and "delivery_date" in df.columns:
-                df = df[df["lock_time"].notna() & df["delivery_date"].notna()]
+            if "delivery_date" in df.columns:
+                df = df[df["delivery_date"].notna()]
         elif metric in ["开票量", "开票数", "开票金额", "invoice_amount"]:
-            if "invoice_upload_time" in df.columns and "lock_time" in df.columns:
-                df = df[df["invoice_upload_time"].notna() & df["lock_time"].notna()]
+            if "invoice_upload_time" in df.columns:
+                df = df[df["invoice_upload_time"].notna()]
         elif metric in ["小订数", "小订量"] and "intention_payment_time" in df.columns:
             df = df[df["intention_payment_time"].notna()]
 

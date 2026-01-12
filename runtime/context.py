@@ -203,11 +203,15 @@ class DataManager:
                         pass
 
             try:
+                # YYYY (Year)
+                if re.match(r'^\d{4}$', date_range):
+                    year_val = int(date_range)
+                    return df[df[time_col].dt.year == year_val]
                 # YYYY-MM (Month)
                 if re.match(r'^\d{4}-\d{2}$', date_range):
                     return df[df[time_col].dt.strftime('%Y-%m') == date_range]
                 # YYYY-MM-DD (Day)
-                elif re.match(r'^\d{4}-\d{2}-\d{2}$', date_range):
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', date_range):
                     return df[df[time_col].dt.strftime('%Y-%m-%d') == date_range]
             except Exception:
                 pass
