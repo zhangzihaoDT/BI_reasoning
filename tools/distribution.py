@@ -21,6 +21,7 @@ class DistributionTool(BaseTool):
         bins_param = params.get("bins", 30)
         date_range = params.get("date_range")
         compare_date_range = params.get("compare_date_range")
+        return_buckets = params.get("return_buckets", True)
         
         # Determine time column
         time_col = 'order_create_date'
@@ -55,6 +56,8 @@ class DistributionTool(BaseTool):
         def get_metric_series(df: pd.DataFrame, metric_expr: str) -> pd.Series:
             if not isinstance(metric_expr, str):
                 return pd.Series()
+            
+            # 1. Datediff pattern
             match = re.search(r"datediff\('day',\s*([a-zA-Z0-9_]+),\s*([a-zA-Z0-9_]+)\)", metric_expr)
             if match:
                 start_col, end_col = match.groups()
@@ -63,6 +66,34 @@ class DistributionTool(BaseTool):
                     e = parse_dates(df[end_col])
                     diff = (e - s).dt.days
                     return diff.dropna()
+            
+            # 2. Conversion Rates (Assign Data) - Pre-calculated columns? No, need to calc on the fly or assume exist.
+            # But wait, assign data is usually daily aggregated.
+            # If the input DF is assign data (daily granularity), we can calculate the rate per day.
+            
+            assign_rate_map = {
+                "assign_store_structure": ("下发线索当日锁单数 (门店)", "下发线索数 (门店)"),
+                "assign_rate_7d_lock": ("下发线索 7 日锁单数", "下发线索数"),
+                "assign_rate_7d_test_drive": ("下发线索 7 日试驾数", "下发线索数"),
+            }
+            
+            if metric_expr in assign_rate_map:
+                num_col, den_col = assign_rate_map[metric_expr]
+                if num_col in df.columns and den_col in df.columns:
+                     # Calculate rate per row (which is per day for assign data)
+                     # Handle division by zero
+                     num = pd.to_numeric(df[num_col], errors='coerce').fillna(0.0)
+                     den = pd.to_numeric(df[den_col], errors='coerce').fillna(0.0)
+                     # Filter out days with 0 denominator to avoid inf? Or set to 0?
+                     # Usually for distribution analysis (histogram), we want valid rates.
+                     # If denominator is 0, rate is undefined. Let's drop them.
+                     valid_mask = den > 0
+                     if valid_mask.sum() == 0:
+                         return pd.Series()
+                     rates = num[valid_mask] / den[valid_mask]
+                     return rates
+            
+            # 3. Direct column
             if metric_expr in df.columns:
                 return pd.to_numeric(df[metric_expr], errors='coerce').dropna()
             return pd.Series()
@@ -236,5 +267,33 @@ class DistributionTool(BaseTool):
                 "message": f"Distribution difference score {sad:.2f} ({'Abnormal' if is_abnormal else 'Normal'})"
             })
 
-        result["bins"] = bins_data
+            # Calculate Position Statistics (New)
+            if not series_primary.empty:
+                current_mean = series_primary.mean()
+                # Percentile
+                comp_values = series_compare.values
+                percentile = (comp_values < current_mean).mean() * 100
+                
+                # Z-Score
+                mean_hist = series_compare.mean()
+                std_hist = series_compare.std()
+                z_score = 0.0
+                if std_hist > 1e-9:
+                    z_score = (current_mean - mean_hist) / std_hist
+                
+                result["position"] = {
+                    "current_value": float(current_mean),
+                    "historical_mean": float(mean_hist),
+                    "historical_std": float(std_hist),
+                    "percentile": float(percentile),
+                    "z_score": float(z_score),
+                    "rank_desc": f"P{percentile:.1f}"
+                }
+                
+                # Update signal message
+                if result["signals"]:
+                    result["signals"][-1]["message"] += f" | Position: P{percentile:.1f} (Z={z_score:.2f})"
+
+        if return_buckets:
+            result["bins"] = bins_data
         return result

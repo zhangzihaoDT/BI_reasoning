@@ -197,11 +197,21 @@ def _toolbox_for_high_risk(date_range: str, compare_date_range: str = None) -> L
             "tool": "trend",
             "parameters": {"metric": "sales", "date_range": "last_30_days", "time_grain": "day"},
         },
-        # 3. 核心转化率趋势 (保留 30 天趋势以识别惯性)
+        # 3. 核心转化率分布定位 (近 365 天分布，定位当前水位)
         {
-            "id": "rate_trend_30d",
-            "tool": "trend",
-            "parameters": {"metric": "assign_store_structure", "date_range": "last_30_days", "time_grain": "day"},
+            "id": "rate_dist_30d",
+            "tool": "distribution",
+            "parameters": {"metric": "assign_store_structure", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
+        },
+        {
+            "id": "rate_dist_7d_lock_30d",
+            "tool": "distribution",
+            "parameters": {"metric": "assign_rate_7d_lock", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
+        },
+        {
+            "id": "rate_dist_7d_drive_30d",
+            "tool": "distribution",
+            "parameters": {"metric": "assign_rate_7d_test_drive", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
         },
     ]
     return tasks
@@ -224,22 +234,25 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
     system_prompt = (
         "你是一位高密度业务诊断专家。请基于提供的 JSON 数据字典（包含 keys: 'core', 'sales_orders', 'rate_trend', 'signals'），输出一份**极简、去噪、高密度**的诊断报告。\n"
         "数据源映射说明：\n"
-        "- **core**: 包含核心转化率指标 (assign_store_structure) 及其历史统计 (Z-score)。\n"
+        "- **core**: 包含核心转化率指标 (assign_store_structure, 即**门店线索当日锁单率**) 及渠道结构指标 (assign_store_leads_ratio, 即**门店线索占比**) 的历史统计 (Z-score)。\n"
         "- **sales_orders**: \n"
         "    - **structure**: 包含结构分布 (series) 及 SAD 异动评分。\n"
-        "    - **trend**: 包含销量趋势 (day_30) 及生命周期信号 (lifecycle)。\n"
-        "- **rate_trend**: 包含核心转化率 (assign_store_structure) 的 30 天趋势。\n"
+        "    - **trend**: 包含销量趋势 (day_30) 及生命周期信号 (lifecycle)。**注意：销量日环比变化必须使用 `yesterday_change` 字段中的数据，严禁自行根据不完整的 `series` 列表末端计算，防止因数据截断导致误判。**\n"
+        "- **rate_trend**: 包含 3 组转化率在近 365 天历史分布中的定位（Distribution Check），而非趋势图：\n"
+        "    - **30d**: 门店线索当日锁单率 (assign_store_structure)\n"
+        "    - **7d_lock_30d**: 7日锁单率 (assign_rate_7d_lock)\n"
+        "    - **7d_drive_30d**: 7日试驾率 (assign_rate_7d_test_drive)\n"
         "- **signals**: 包含系统自动识别的异常信号。\n\n"
         "严格遵循以下格式和原则：\n"
         "1. **格式模板**：\n"
         "## 🟢/🔴 诊断结论：风险 [Low/High]\n"
-        "**核心数据**：[基于 core 数据，指出转化率绝对值及偏离度，如“门店线索转化率0.75% (Z-score -2.44)”]。\n"
-        "**风险判定**：[一句话定性，如“转化率显著低于历史均值，构成结构性异常”]。\n\n"
+        "**核心数据**：[基于 core 数据，指出转化率绝对值及偏离度，如“门店线索当日锁单率0.75% (Z-score -2.44)”；若门店线索占比有显著偏离也需指出，如“门店线索占比激增(Z=3.1)”]。\n"
+        "**风险判定**：[一句话定性，如“门店线索当日锁单率显著低于历史均值，构成结构性异常”]。\n\n"
         "## 🔍 逐项排查 (Checklist)\n"
         "请按以下顺序逐项检查，**仅展示有问题（High Risk）的项**，若某项正常（如波动在合理范围内）则**直接省略**，保持报告极简。\n"
         "**1. 结构偏移 (Structure Check)**：[检查 sales_orders.structure。若 SAD > 0.1，指出具体的偏移因子。例：“车型结构偏移(SAD=0.34)，主因 LS9 占比回落(-14pct)被 CM2(+13pct)挤占。”]\n"
-        "**2. 趋势断层 (Sales Trend Check)**：[检查 sales_orders.trend。观察 30 天趋势线，若呈现急剧下行或处于低位，指出具体形态。例：“LS9 销量处于上市退坡后的低位震荡期。”]\n"
-        "**3. 转化率惯性 (Rate Trend Check)**：[检查 rate_trend。判断转化率下滑是短期波动还是长期趋势。例：“转化率近30天呈持续下滑态势(Trend Down)。”]\n\n"
+        "**2. 趋势断层 (Sales Trend Check)**：[检查 sales_orders.trend。观察 30 天趋势线，若呈现急剧下行或处于低位，指出具体形态。引用环比跌幅时务必使用 `yesterday_change` 字段。例：“LS9 销量处于上市退坡后的低位震荡期，日环比微跌 5%。”]\n"
+        "**3. 转化率水位 (Rate Position Check)**：[检查 rate_trend 中的分布定位 (position)。若任一指标处于历史低位（如 P<10 或 低于历史均值-1σ），明确指出百分位 (Percentile)。例：“门店线索当日锁单率与7日试驾率均处于历史极低水位(P<5)，表明流量质量或承接能力出现系统性下滑。”]\n\n"
         "## 💡 归因综述\n"
         "[基于上述检出的异常项，用一句话逻辑闭环解释核心转化率异常的原因。例：“LS9 上市退坡导致高转化客群流失，叠加长期转化率下行趋势，导致今日转化率击穿历史极值。”]\n\n"
         "2. **原则**：\n"
@@ -369,12 +382,11 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
             elif k.startswith("sales_trend_"):
                 clean_key = k.replace("sales_trend_", "")
                 sales_trend[clean_key] = v
-            elif k.startswith("rate_trend_"):
-                clean_key = k.replace("rate_trend_", "")
+            elif k.startswith("rate_dist_"):
+                clean_key = k.replace("rate_dist_", "")
                 rate_trend[clean_key] = v
             else:
-                # Fallback
-                rate_trend[k] = v
+                pass
 
     payload = {
         "date": date_range,

@@ -267,6 +267,8 @@ class DataManager:
                 "rate_30d_test_drive": 0.0,
                 "rate_30d_lock": 0.0,
                 "avg_daily_leads_per_store": 0.0,
+                "assign_store_leads_ratio": 0.0,
+                "assign_store_structure": 0.0,
             }
         leads = float(df['下发线索数'].sum())
         same_day = float(df['下发线索当日试驾数'].sum())
@@ -274,6 +276,11 @@ class DataManager:
         d7_lock = float(df['下发线索 7 日锁单数'].sum())
         d30_td = float(df['下发线索 30日试驾数'].sum())
         d30_lock = float(df['下发线索 30 日锁单数'].sum())
+        
+        # New metrics for store leads
+        store_leads = float(df['下发线索数 (门店)'].sum())
+        store_lock_same_day = float(df['下发线索当日锁单数 (门店)'].sum())
+        
         def _rate(n: float, d: float) -> float:
             return float(n / d) if d and d > 0 else 0.0
         with np.errstate(divide='ignore', invalid='ignore'):
@@ -287,4 +294,6 @@ class DataManager:
             "rate_30d_test_drive": _rate(d30_td, leads),
             "rate_30d_lock": _rate(d30_lock, leads),
             "avg_daily_leads_per_store": avg_daily_leads_per_store,
+            "assign_store_leads_ratio": _rate(store_leads, leads),
+            "assign_store_structure": _rate(store_lock_same_day, store_leads),
         }

@@ -336,6 +336,29 @@ class TrendTool(BaseTool):
                 change = curr - prev
                 if prev != 0:
                     change_pct = change / prev
+            
+            # Calculate Yesterday Change explicitly
+            yesterday_change = {}
+            if time_grain == 'day':
+                 today = pd.Timestamp.now().normalize()
+                 yesterday = today - pd.Timedelta(days=1)
+                 day_before = yesterday - pd.Timedelta(days=1)
+                 
+                 y_val = next((p.value for p in series if p.date == str(yesterday.date())), None)
+                 db_val = next((p.value for p in series if p.date == str(day_before.date())), None)
+                 
+                 if y_val is not None and db_val is not None:
+                     diff = y_val - db_val
+                     pct = diff / db_val if db_val != 0 else 0.0
+                     yesterday_change = {
+                         "date": str(yesterday.date()),
+                         "value": y_val,
+                         "prev_date": str(day_before.date()),
+                         "prev_value": db_val,
+                         "change": diff,
+                         "change_pct": pct
+                     }
+
             return {
                 "metric": metric,
                 "time_grain": time_grain,
@@ -344,7 +367,8 @@ class TrendTool(BaseTool):
                 "series": series,
                 "signals": lifecycle_signals,
                 "change": change,
-                "change_pct": change_pct
+                "change_pct": change_pct,
+                "yesterday_change": yesterday_change
             }
         
         # Determine time column based on metric
@@ -424,6 +448,29 @@ class TrendTool(BaseTool):
         change = 0.0
         change_pct = 0.0
         
+        # Calculate Yesterday Change explicitly (to avoid partial-day confusion)
+        yesterday_change = {}
+        if time_grain == 'day':
+             today = pd.Timestamp.now().normalize()
+             yesterday = today - pd.Timedelta(days=1)
+             day_before = yesterday - pd.Timedelta(days=1)
+             
+             # Find values in series (series is list of TrendPoint)
+             y_val = next((p.value for p in series if p.date == str(yesterday.date())), None)
+             db_val = next((p.value for p in series if p.date == str(day_before.date())), None)
+             
+             if y_val is not None and db_val is not None:
+                 diff = y_val - db_val
+                 pct = diff / db_val if db_val != 0 else 0.0
+                 yesterday_change = {
+                     "date": str(yesterday.date()),
+                     "value": y_val,
+                     "prev_date": str(day_before.date()),
+                     "prev_value": db_val,
+                     "change": diff,
+                     "change_pct": pct
+                 }
+
         # Special handling for single-point comparisons (e.g. "yesterday")
         if date_range == "yesterday":
             today = pd.Timestamp.now().normalize()
@@ -479,5 +526,6 @@ class TrendTool(BaseTool):
             "series": series,
             "signals": lifecycle_signals,
             "change": change,
-            "change_pct": change_pct
+            "change_pct": change_pct,
+            "yesterday_change": yesterday_change
         }

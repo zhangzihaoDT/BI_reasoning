@@ -21,7 +21,15 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
   - `下发线索当日锁单数 (门店)`：当日门店渠道线索当天即锁单的数量
   - 派生比值：
     - `门店线索占比` = `下发线索数 (门店)` / `下发线索数`
-    - `门店当日锁单率` = `下发线索当日锁单数 (门店)` / `下发线索数 (门店)`
+    - `门店线索当日锁单率` = `下发线索当日锁单数 (门店)` / `下发线索数 (门店)`
+    - `下发线索当日试驾率` = `下发线索当日试驾数` / `下发线索数` (key: `rate_same_day_test_drive`)
+    - `下发线索 7 日试驾率` = `下发线索 7 日试驾数` / `下发线索数` (key: `rate_7d_test_drive`)
+    - `下发线索 7 日锁单率` = `下发线索 7 日锁单数` / `下发线索数` (key: `rate_7d_lock`)
+    - `下发线索 30 日试驾率` = `下发线索 30日试驾数` / `下发线索数` (key: `rate_30d_test_drive`)
+    - `下发线索 30 日锁单率` = `下发线索 30 日锁单数` / `下发线索数` (key: `rate_30d_lock`)
+    - `店均日均线索数` = `下发线索数` / `下发门店数` (key: `avg_daily_leads_per_store`)
+    - `门店线索占比` (key: `assign_store_leads_ratio`)
+    - `门店线索当日锁单率` (key: `assign_store_structure`)
 
 ### 1. 时间维度 (Time Dimensions)
 
