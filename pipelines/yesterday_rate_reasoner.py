@@ -156,11 +156,6 @@ def conditional_rate_assessment(stats: Dict[str, Any], window: float) -> Dict[st
 def _build_dsl(date_range: str) -> List[Dict[str, Any]]:
     return [
         {
-            "id": "lifecycle_check",
-            "tool": "trend",
-            "parameters": {"metric": "sales", "time_grain": "day", "compare_type": "mom", "date_range": date_range},
-        },
-        {
             "id": "assign_leads_mom",
             "tool": "trend",
             "parameters": {"metric": "assign_leads", "time_grain": "day", "compare_type": "mom", "date_range": date_range},
@@ -204,6 +199,11 @@ def _toolbox_for_high_risk(date_range: str, compare_date_range: str = None) -> L
             "parameters": {"metric": "assign_store_structure", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
         },
         {
+            "id": "rate_dist_store_share_30d",
+            "tool": "distribution",
+            "parameters": {"metric": "assign_store_leads_ratio", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
+        },
+        {
             "id": "rate_dist_7d_lock_30d",
             "tool": "distribution",
             "parameters": {"metric": "assign_rate_7d_lock", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
@@ -213,8 +213,31 @@ def _toolbox_for_high_risk(date_range: str, compare_date_range: str = None) -> L
             "tool": "distribution",
             "parameters": {"metric": "assign_rate_7d_test_drive", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
         },
+        # 4. 门店线索数环比 (用于归因总线索变化)
+        {
+            "id": "assign_trend_store_leads",
+            "tool": "trend",
+            "parameters": {"metric": "assign_store_leads", "time_grain": "day", "compare_type": "mom", "date_range": date_range},
+        },
     ]
     return tasks
+
+
+def _get_wow_tasks(date_range: str) -> List[Dict[str, Any]]:
+    return [
+        # 5. 门店线索数同比 (周同比)
+        {
+            "id": "assign_trend_store_leads_wow",
+            "tool": "trend",
+            "parameters": {"metric": "assign_store_leads", "time_grain": "day", "compare_type": "wow", "date_range": date_range},
+        },
+        # 6. 总线索数同比 (周同比)
+        {
+            "id": "assign_trend_leads_wow",
+            "tool": "trend",
+            "parameters": {"metric": "assign_leads", "time_grain": "day", "compare_type": "wow", "date_range": date_range},
+        },
+    ]
 
 
 def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -232,14 +255,20 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
     base_url = "https://api.deepseek.com"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     system_prompt = (
-        "你是一位高密度业务诊断专家。请基于提供的 JSON 数据字典（包含 keys: 'core', 'sales_orders', 'rate_trend', 'signals'），输出一份**极简、去噪、高密度**的诊断报告。\n"
+        "你是一位高密度业务诊断专家。请基于提供的 JSON 数据字典（包含 keys: 'core', 'sales_orders', 'leads_trend', 'rate_trend', 'signals'），输出一份**极简、去噪、高密度**的诊断报告。\n"
         "数据源映射说明：\n"
         "- **core**: 包含核心转化率指标 (assign_store_structure, 即**门店线索当日锁单率**) 及渠道结构指标 (assign_store_leads_ratio, 即**门店线索占比**) 的历史统计 (Z-score)。\n"
         "- **sales_orders**: \n"
         "    - **structure**: 包含结构分布 (series) 及 SAD 异动评分。\n"
         "    - **trend**: 包含销量趋势 (day_30) 及生命周期信号 (lifecycle)。**注意：销量日环比变化必须使用 `yesterday_change` 字段中的数据，严禁自行根据不完整的 `series` 列表末端计算，防止因数据截断导致误判。**\n"
-        "- **rate_trend**: 包含 3 组转化率在近 365 天历史分布中的定位（Distribution Check），而非趋势图：\n"
+        "- **leads_trend**: 包含线索量趋势。\n"
+        "    - **total_leads**: 总线索数 (assign_leads) 的环比变化 (MoM/DoD)。\n"
+        "    - **store_leads**: 门店线索数 (assign_store_leads) 的环比变化。\n"
+        "    - **leads_wow**: 总线索数 (assign_leads) 的周同比变化 (WoW)。\n"
+        "    - **store_leads_wow**: 门店线索数 (assign_store_leads) 的周同比变化 (WoW)。\n"
+        "- **rate_trend**: 包含 3 组转化率及 1 组结构占比在近 365 天历史分布中的定位（Distribution Check）：\n"
         "    - **30d**: 门店线索当日锁单率 (assign_store_structure)\n"
+        "    - **store_share_30d**: 门店线索占比 (assign_store_leads_ratio)\n"
         "    - **7d_lock_30d**: 7日锁单率 (assign_rate_7d_lock)\n"
         "    - **7d_drive_30d**: 7日试驾率 (assign_rate_7d_test_drive)\n"
         "- **signals**: 包含系统自动识别的异常信号。\n\n"
@@ -252,13 +281,14 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         "请按以下顺序逐项检查，**仅展示有问题（High Risk）的项**，若某项正常（如波动在合理范围内）则**直接省略**，保持报告极简。\n"
         "**1. 结构偏移 (Structure Check)**：[检查 sales_orders.structure。若 SAD > 0.1，指出具体的偏移因子。例：“车型结构偏移(SAD=0.34)，主因 LS9 占比回落(-14pct)被 CM2(+13pct)挤占。”]\n"
         "**2. 趋势断层 (Sales Trend Check)**：[检查 sales_orders.trend。观察 30 天趋势线，若呈现急剧下行或处于低位，指出具体形态。引用环比跌幅时务必使用 `yesterday_change` 字段。例：“LS9 销量处于上市退坡后的低位震荡期，日环比微跌 5%。”]\n"
-        "**3. 转化率水位 (Rate Position Check)**：[检查 rate_trend 中的分布定位 (position)。若任一指标处于历史低位（如 P<10 或 低于历史均值-1σ），明确指出百分位 (Percentile)。例：“门店线索当日锁单率与7日试驾率均处于历史极低水位(P<5)，表明流量质量或承接能力出现系统性下滑。”]\n\n"
+        "**3. 转化率水位 (Rate Position Check)**：[检查 rate_trend 中的分布定位 (position)。若任一指标处于历史低位（如 P<10 或 低于历史均值-1σ），明确指出百分位 (Percentile)。特别注意门店线索占比 (store_share_30d) 的异常分布。例：“门店线索当日锁单率与7日试驾率均处于历史极低水位(P<5)，表明流量质量或承接能力出现系统性下滑。”]\n"
+        "**4. 线索归因 (Leads Impact Check)**：[检查 leads_trend。若总线索 (total_leads) 或 门店线索 (store_leads) 任一发生显著波动（如跌幅 > 10%），则必须进行归因分析。检查总线索波动是否由门店线索导致，并对比 WoW 数据 (leads_wow, store_leads_wow) 确认是否为周期性波动。例：“总线索量环比下跌 4%，但门店线索大幅萎缩 (-26%) 且 WoW 同步下跌 20%，表明非周期性的渠道异常。”]\n\n"
         "## 💡 归因综述\n"
         "[基于上述检出的异常项，用一句话逻辑闭环解释核心转化率异常的原因。例：“LS9 上市退坡导致高转化客群流失，叠加长期转化率下行趋势，导致今日转化率击穿历史极值。”]\n\n"
         "2. **原则**：\n"
-        "- **有问题说，没问题不说**：不要罗列正常数据，只暴露风险。\n"
-        "- **量化优先**：禁止使用“大幅上升”等模糊词，必须使用“低-2.44σ”、“SAD 0.33”等精确数据。\n"
-        "- **逻辑闭环**：最后的归因综述必须基于 Checklist 中发现的问题。"
+        "**有问题说，没问题不说**：不要罗列正常数据，只暴露风险。\n"
+        "**量化优先**：禁止使用“大幅上升”等模糊词，必须使用“低-2.44σ”、“SAD 0.33”等精确数据。\n"
+        "**逻辑闭环**：最后的归因综述必须基于 Checklist 中发现的问题。"
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -364,10 +394,33 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
         deep_state = app.invoke(state2)
         final_state["results"]["toolbox_analysis"] = deep_state["results"]
 
+        # 检查是否需要触发 WoW 周期性排查
+        # 触发条件：门店线索环比变化幅度 >= 10%
+        store_leads_res = deep_state["results"].get("assign_trend_store_leads", {})
+        change_pct = store_leads_res.get("change_pct", 0.0)
+        
+        if abs(change_pct) >= 0.1:
+            print(f"⚠️ 检测到门店线索显著波动 ({change_pct:.1%})，追加 WoW 周期性排查...")
+            wow_tasks = _get_wow_tasks(date_range)
+            state3 = {
+                "dsl_sequence": wow_tasks,
+                "current_step": 0,
+                "results": {},
+                "signals": [],
+            }
+            wow_state = app.invoke(state3)
+            # Merge results
+            final_state["results"]["toolbox_analysis"].update(wow_state["results"])
+
     # Group results for DeepSeek
     sales_structure = {}
     sales_trend = {}
     rate_trend = {}
+    leads_trend = {}
+    
+    # 0. Add initial DSL results to leads_trend
+    if "assign_leads_mom" in final_state["results"]:
+        leads_trend["total_leads"] = final_state["results"]["assign_leads_mom"]
     
     # 1. Add lifecycle check to sales_trend
     if "lifecycle_check" in final_state["results"]:
@@ -385,6 +438,9 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
             elif k.startswith("rate_dist_"):
                 clean_key = k.replace("rate_dist_", "")
                 rate_trend[clean_key] = v
+            elif k.startswith("assign_trend_"):
+                clean_key = k.replace("assign_trend_", "")
+                leads_trend[clean_key] = v
             else:
                 pass
 
@@ -395,9 +451,11 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
             "structure": sales_structure,
             "trend": sales_trend
         },
+        "leads_trend": leads_trend,
         "rate_trend": rate_trend,
         "signals": final_state["signals"],
     }
+    
     report, metrics = _call_deepseek_reasoner(payload)
     final_state["results"]["reasoner_report"] = report
     final_state["results"]["reasoner_metrics"] = metrics

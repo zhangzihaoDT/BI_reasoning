@@ -322,7 +322,7 @@ python -m pipelines.yesterday_rate --start 2026-01-01 --end 2026-01-05
 
 ---
 
-## 10. 🚀 关键节点记录 (2026-01-12) - DeepSeek Thinking Mode 引入
+## 10. 关键节点记录 (2026-01-12) - DeepSeek Thinking Mode 引入
 
 为解决自然语言查询中复杂的意图识别与参数提取问题，系统引入了 **DeepSeek Thinking Mode (深度思考模式)**，并构建了 Reasoner 版的查询代理。
 
@@ -412,3 +412,49 @@ Signals:
 **1. 结构拆解**：CM2 占比 73.8%，贡献了绝大部分销售额，且其环比增速快于整体。
 **2. 分布特征**：订单流转天数分布集中，约73.8%的订单在5天内完成，与历史分布基本一致。
 ```
+
+## 11. 🚀 关键节点记录 (2026-01-13) - yesterday_rate_reasoner
+
+为降低 Token 消耗并提升归因精准度，我们在 [`pipelines/yesterday_rate_reasoner.py`](pipelines/yesterday_rate_reasoner.py) 中引入了 **“条件触发式” (Conditional Trigger)** 诊断流程。系统仅在检测到显著异常时，才动态加载深层分析任务（如 WoW 周期性对比），实现精细化的 Token 预算管理。
+
+### 核心流程图 (Workflow)
+
+```mermaid
+graph TD
+    Start([Start Pipeline]) --> Baseline["Baseline Analysis<br/>(MoM / 7d Rates)"]
+    Baseline --> RiskCheck{"Structure Risk<br/>Assessment"}
+
+    RiskCheck -->|Low/Mid Risk| Payload[Payload Assembly]
+    RiskCheck -->|High Risk| Toolbox["High-Risk Toolbox<br/>(Distribution/Trend30d/LeadsMoM)"]
+
+    Toolbox --> LeadsCheck{"Store Leads<br/>Fluctuation?"}
+    LeadsCheck -->|Change < 10%| Payload
+    LeadsCheck -->|Change >= 10%| WoW["WoW Analysis<br/>(Store Leads/Total Leads)"]
+
+    WoW --> Payload
+
+    Payload --> DeepSeek["DeepSeek Reasoner<br/>(Attribution Logic)"]
+    DeepSeek --> Report([Final Report])
+
+    style RiskCheck fill:#fff3e0,stroke:#f57c00
+    style Toolbox fill:#ffebee,stroke:#d32f2f
+    style WoW fill:#f3e5f5,stroke:#7b1fa2
+    style DeepSeek fill:#e3f2fd,stroke:#1976d2
+```
+
+### 核心特性
+
+1.  **Lazy Loading (按需加载)**:
+
+    - 基础层仅运行最低限度的 MoM 和 Rate 检查。
+    - **Level 1 Trigger**: 仅当结构风险（Structure Risk）判定为 `High` 时，才加载 `_toolbox_for_high_risk`（包含 30 天趋势、分布定位）。
+    - **Level 2 Trigger**: 仅当 Level 1 发现门店线索显著波动（`change_pct >= 10%`）时，才追加 `_get_wow_tasks` 进行周同比分析。
+
+2.  **Context Injection (上下文注入)**:
+
+    - DeepSeek 接收的 Context 随着排查深度动态丰富。
+    - Prompt 会自动根据是否有 WoW 数据，决定是否进行“周期性 vs 非周期性”的归因判断。
+
+3.  **Token Efficiency (成本优化)**:
+    - 在无异常的平稳期，系统跳过所有深层工具调用，Token 消耗降低 60% 以上。
+    - 仅在“刀刃上”花钱，确保高风险日期的诊断深度。

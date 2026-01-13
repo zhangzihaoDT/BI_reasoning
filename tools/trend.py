@@ -121,6 +121,7 @@ class TrendTool(BaseTool):
         
         assign_metric_map = {
             "assign_leads": "下发线索数",
+            "assign_store_leads": "下发线索数 (门店)",
             "assign_testdrive_d1": "下发线索当日试驾数",
             "assign_testdrive_d7": "下发线索 7 日试驾数",
             "assign_lock_d7": "下发线索 7 日锁单数",
