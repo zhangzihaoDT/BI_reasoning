@@ -135,7 +135,9 @@ class DataManager:
                     '下发线索 7 日锁单数',
                     '下发线索 30日试驾数',
                     '下发线索 30 日锁单数',
-                    '下发门店数'
+                    '下发门店数',
+                    '下发线索当日锁单数 (门店)',
+                    '下发线索数 (门店)'
                 ]
                 for c in required_cols:
                     if c not in df.columns:

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import pandas as pd
 import re
+import json
+from pathlib import Path
 
 from tools.base import BaseTool
 from runtime.context import DataManager
@@ -21,14 +23,91 @@ class TrendTool(BaseTool):
     def can_handle(self, step: dict) -> bool:
         return step.get("tool") == "trend"
 
+    def _load_lifecycle_config(self) -> Dict[str, Any]:
+        path = Path("/Users/zihao_/Documents/github/W52_reasoning/world/business_definition.json")
+        if path.exists():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _check_lifecycle_impact(self, date_range: str, filters: Optional[Any] = None) -> List[str]:
+        target_date = pd.Timestamp.now().normalize()
+        if date_range == 'yesterday':
+             target_date = target_date - pd.Timedelta(days=1)
+        
+        config = self._load_lifecycle_config()
+        time_periods = config.get("time_periods", {})
+        signals = []
+        
+        target_series = []
+        if filters:
+             if isinstance(filters, dict):
+                 filters = [{"field": k, "op": "=", "value": v} for k, v in filters.items()]
+             if isinstance(filters, list):
+                 for f in filters:
+                     if isinstance(f, dict) and f.get('field') == 'series_group' and f.get('op') in ['=', '==']:
+                         target_series.append(f.get('value'))
+        
+        candidates = target_series if target_series else time_periods.keys()
+        
+        for series in candidates:
+            if series not in time_periods:
+                continue
+            period = time_periods[series]
+            finish_str = period.get("finish")
+            if not finish_str:
+                continue
+            
+            try:
+                finish_date = pd.to_datetime(finish_str).normalize()
+                if finish_date + pd.Timedelta(days=31) <= target_date <= finish_date + pd.Timedelta(days=60):
+                    days_since_finish = (target_date - finish_date).days
+                    signals.append(f"车型 {series} 处于上市权益退坡后的观察期（{finish_str} 后第 {days_since_finish} 天，区间 31-60 天），可能出现结构性自然回落或需求转移。")
+            except:
+                pass
+        return signals
+
+    def _apply_filters(self, df: pd.DataFrame, filters: Any) -> pd.DataFrame:
+        if df.empty or not filters:
+            return df
+        
+        if isinstance(filters, dict):
+            filters = [{"field": k, "op": "=", "value": v} for k, v in filters.items()]
+            
+        if not isinstance(filters, list):
+            return df
+
+        for f in filters:
+            if not isinstance(f, dict): continue
+            field = f.get("field")
+            op = (f.get("op") or "=").lower()
+            value = f.get("value")
+            if not field or field not in df.columns:
+                continue
+            if op in ["=", "=="]:
+                df = df[df[field] == value]
+            elif op == "in":
+                 values = value if isinstance(value, list) else [value]
+                 df = df[df[field].isin(values)]
+            elif op == "contains":
+                 df = df[df[field].astype(str).str.contains(str(value), na=False)]
+        return df
+
     def execute(self, step: dict, state: dict):
         params = step.get("parameters", {})
         metric = params.get("metric")
         time_grain = params.get("time_grain", "day")
         compare_type = params.get("compare_type")
         date_range = params.get("date_range")
+        filters = params.get("filters")
 
         dm = DataManager()
+        
+        # Calculate lifecycle signals
+        lifecycle_signals = self._check_lifecycle_impact(date_range, filters)
 
         def _parse_explicit_day(dr: Any) -> Optional[pd.Timestamp]:
             if not isinstance(dr, str):
@@ -56,11 +135,14 @@ class TrendTool(BaseTool):
             "assign_rate_30d_test_drive": ("下发线索 30日试驾数", "下发线索数"),
             "assign_rate_30d_lock": ("下发线索 30 日锁单数", "下发线索数"),
             "assign_avg_daily_leads_per_store": ("下发线索数", "下发门店数"),
+            "assign_store_structure": ("下发线索当日锁单数 (门店)", "下发线索数 (门店)"),
         }
         
         if metric in assign_rate_map:
             time_col = 'assign_date'
             df = dm.filter_assign_data(date_range)
+            # Note: filters cannot be applied to assign_data as it lacks dimensions
+            
             num_col, den_col = assign_rate_map[metric]
             if df.empty or time_col not in df.columns or num_col not in df.columns or den_col not in df.columns:
                 return {
@@ -69,7 +151,7 @@ class TrendTool(BaseTool):
                     "compare_type": compare_type,
                     "date_range": date_range,
                     "series": [],
-                    "signals": [],
+                    "signals": lifecycle_signals,
                     "change": 0.0,
                     "change_pct": 0.0
                 }
@@ -93,7 +175,12 @@ class TrendTool(BaseTool):
             if date_range == "yesterday":
                 today = pd.Timestamp.now().normalize()
                 target_date = today - pd.Timedelta(days=1)
-                compare_date = target_date - (pd.Timedelta(days=7) if compare_type == 'wow' else pd.Timedelta(days=1))
+                delta = pd.Timedelta(days=1)
+                if compare_type == 'wow':
+                    delta = pd.Timedelta(days=7)
+                elif compare_type == 'yoy':
+                    delta = pd.Timedelta(days=365)
+                compare_date = target_date - delta
                 full = dm.get_assign_data()
                 if time_col in full.columns and num_col in full.columns and den_col in full.columns:
                     curr_df = full[full[time_col].dt.date == target_date.date()]
@@ -109,9 +196,12 @@ class TrendTool(BaseTool):
                         change_pct = change / prev_val
             elif explicit_day is not None:
                 target_date = explicit_day
-                compare_date = target_date - (
-                    pd.Timedelta(days=7) if compare_type == "wow" else pd.Timedelta(days=1)
-                )
+                delta = pd.Timedelta(days=1)
+                if compare_type == 'wow':
+                    delta = pd.Timedelta(days=7)
+                elif compare_type == 'yoy':
+                    delta = pd.Timedelta(days=365)
+                compare_date = target_date - delta
                 full = dm.get_assign_data()
                 if time_col in full.columns and num_col in full.columns and den_col in full.columns:
                     curr_df = full[full[time_col].dt.normalize() == target_date]
@@ -138,7 +228,7 @@ class TrendTool(BaseTool):
                         "value": 0.0,
                         "mean": 0.0,
                         "std": 0.0,
-                        "signals": [],
+                        "signals": lifecycle_signals,
                     }
                 values = pd.Series([p.value for p in series])
                 value = float(values.iloc[-1])
@@ -152,7 +242,7 @@ class TrendTool(BaseTool):
                     "value": value,
                     "mean": mean,
                     "std": std,
-                    "signals": [],
+                    "signals": lifecycle_signals,
                 }
             return {
                 "metric": metric,
@@ -160,7 +250,7 @@ class TrendTool(BaseTool):
                 "compare_type": compare_type,
                 "date_range": date_range,
                 "series": series,
-                "signals": [],
+                "signals": lifecycle_signals,
                 "change": change,
                 "change_pct": change_pct
             }
@@ -168,6 +258,7 @@ class TrendTool(BaseTool):
         if metric in assign_metric_map:
             time_col = 'assign_date'
             df = dm.filter_assign_data(date_range)
+            # Note: filters cannot be applied to assign_data
             target_col = assign_metric_map[metric]
             
             if step.get("id") == "anomaly_check":
@@ -177,7 +268,7 @@ class TrendTool(BaseTool):
                         "value": 0.0,
                         "mean": 0.0,
                         "std": 0.0,
-                        "signals": [],
+                        "signals": lifecycle_signals,
                     }
                 daily = df.groupby(df[time_col].dt.date)[target_col].sum()
                 value = float(daily.iloc[-1]) if not daily.empty else 0.0
@@ -191,14 +282,14 @@ class TrendTool(BaseTool):
                     "value": value,
                     "mean": mean,
                     "std": std,
-                    "signals": [],
+                    "signals": lifecycle_signals,
                 }
             
             if df.empty or target_col not in df.columns:
                  return {
                     "metric": metric,
                     "series": [],
-                    "signals": [],
+                    "signals": lifecycle_signals,
                 }
             
             df_sorted = df.sort_values(time_col).set_index(time_col)
@@ -251,7 +342,7 @@ class TrendTool(BaseTool):
                 "compare_type": compare_type,
                 "date_range": date_range,
                 "series": series,
-                "signals": [],
+                "signals": lifecycle_signals,
                 "change": change,
                 "change_pct": change_pct
             }
@@ -264,6 +355,10 @@ class TrendTool(BaseTool):
             time_col = 'invoice_upload_time'
             
         df = dm.filter_data(date_range, time_col=time_col)
+        
+        # Apply filters (NEW)
+        if filters:
+            df = self._apply_filters(df, filters)
 
         # Apply metric definition
         if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
@@ -278,7 +373,7 @@ class TrendTool(BaseTool):
                     "value": 0.0,
                     "mean": 0.0,
                     "std": 0.0,
-                    "signals": [],
+                    "signals": lifecycle_signals,
                 }
             
             # Group by day to get daily stats (use time_col)
@@ -297,14 +392,14 @@ class TrendTool(BaseTool):
                 "value": value,
                 "mean": mean,
                 "std": std,
-                "signals": [],
+                "signals": lifecycle_signals,
             }
 
         if df.empty:
              return {
                 "metric": metric,
                 "series": [],
-                "signals": [],
+                "signals": lifecycle_signals,
             }
 
         # Resample
@@ -338,11 +433,17 @@ class TrendTool(BaseTool):
             compare_date = None
             if compare_type == 'wow':
                 compare_date = target_date - pd.Timedelta(days=7)
+            elif compare_type == 'yoy':
+                compare_date = target_date - pd.Timedelta(days=365)
             else: # Default to mom (day-over-day for daily grain)
                 compare_date = target_date - pd.Timedelta(days=1)
                 
             # Fetch comparison data (using raw df from DataManager but manually filtering)
             full_df = dm.get_data()
+            
+            # Filter full_df with FILTERS (Important!)
+            if filters:
+                full_df = self._apply_filters(full_df, filters)
             
             # Filter prev_df using time_col
             if time_col in full_df.columns:
@@ -376,7 +477,7 @@ class TrendTool(BaseTool):
             "compare_type": compare_type,
             "date_range": date_range,
             "series": series,
-            "signals": [],
+            "signals": lifecycle_signals,
             "change": change,
             "change_pct": change_pct
         }

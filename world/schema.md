@@ -17,6 +17,11 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
   - `下发线索 30日试驾数`
   - `下发线索 30 日锁单数`
   - `下发门店数`
+  - `下发线索数 (门店)`：当日门店渠道收到的线索总数
+  - `下发线索当日锁单数 (门店)`：当日门店渠道线索当天即锁单的数量
+  - 派生比值：
+    - `门店线索占比` = `下发线索数 (门店)` / `下发线索数`
+    - `门店当日锁单率` = `下发线索当日锁单数 (门店)` / `下发线索数 (门店)`
 
 ### 1. 时间维度 (Time Dimensions)
 
@@ -63,6 +68,14 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 - `series`: 车型系列
 - `belong_intent_series`: 意向系列
 - `drive_series_cn`: 驱动系列（中文）
+
+##### 车型生命周期定义
+
+基于 [business_definition.json](file:///Users/zihao_/Documents/github/W52_reasoning/world/business_definition.json#L1-L33) 的 `time_periods`：
+
+- `start`（startday）：预售开始时间
+- `end`（endday）：上市时间
+- `finish`（finishday）：上市权益退坡时间
 
 #### 地理位置
 
