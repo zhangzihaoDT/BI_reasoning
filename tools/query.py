@@ -5,6 +5,16 @@ import pandas as pd
 
 class QueryTool(BaseTool):
     name = "query"
+    """
+    Executes data queries on the order dataset.
+    
+    Parameters:
+    - date_range (str): Time range filter (e.g., "2024-01-01/2024-01-31", "last_30_days").
+    - metric (str): Metric to calculate (e.g., "sales", "交付量", "invoice_amount").
+    - filters (dict|list): Additional filters on columns (e.g., {"product_name": "LS6"}).
+    - interval (str, optional): Aggregation interval ("day", "week", "month", "year"). 
+      If provided, returns a dictionary of {date: value}. If omitted, returns a single scalar value.
+    """
 
     def can_handle(self, step: dict) -> bool:
         return step.get("tool") == "query"
@@ -86,6 +96,43 @@ class QueryTool(BaseTool):
                 df = df[df["invoice_upload_time"].notna()]
         elif metric in ["小订数", "小订量"] and "intention_payment_time" in df.columns:
             df = df[df["intention_payment_time"].notna()]
+
+        interval = params.get("interval")
+        if interval and time_col in df.columns and not df.empty:
+            rule_map = {
+                "day": "D", "daily": "D",
+                "week": "W", "weekly": "W",
+                "month": "ME", "monthly": "ME",
+                "quarter": "QE", "quarterly": "QE",
+                "year": "YE", "yearly": "YE"
+            }
+            rule = rule_map.get(str(interval).lower())
+            
+            if rule:
+                # Ensure time_col is datetime
+                if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
+                    df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
+                    df = df.dropna(subset=[time_col])
+
+                if metric in ["开票金额", "invoice_amount"] and "invoice_amount" in df.columns:
+                    df = df.copy()
+                    df["invoice_amount"] = pd.to_numeric(df["invoice_amount"], errors="coerce").fillna(0)
+                    series = df.set_index(time_col).resample(rule)["invoice_amount"].sum()
+                else:
+                    series = df.set_index(time_col).resample(rule).size()
+                
+                result_dict = {
+                    k.strftime('%Y-%m-%d'): (v.item() if hasattr(v, 'item') else v)
+                    for k, v in series.items()
+                    if v > 0
+                }
+
+                return {
+                    "value": result_dict,
+                    "metric": metric,
+                    "interval": interval,
+                    "signals": [],
+                }
 
         if metric in ["开票金额", "invoice_amount"] and "invoice_amount" in df.columns:
             value = float(pd.to_numeric(df["invoice_amount"], errors="coerce").fillna(0).sum())

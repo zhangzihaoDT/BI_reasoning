@@ -70,6 +70,11 @@ class QueryAgentReasoner:
                                     },
                                     "required": ["field", "op", "value"]
                                 }
+                            },
+                            "interval": {
+                                "type": "string",
+                                "enum": ["day", "week", "month", "year"],
+                                "description": "Time interval for aggregation. If provided, returns a time series dictionary (e.g., {'2025-01-31': 100}). Use this for trends or breakdowns over time."
                             }
                         },
                         "required": ["metric", "date_range"]
@@ -191,8 +196,8 @@ Your goal is to answer the user's questions about business data by querying the 
 **Process:**
 1. Analyze the user's request.
 2. Call the appropriate tool (query_data or rollup_data) to get the data.
-   - Use 'query_data' for single numbers.
-   - Use 'rollup_data' when grouping by dimensions (e.g., by city, by model).
+   - Use 'query_data' for single numbers OR time-series trends (using 'interval' parameter).
+   - Use 'rollup_data' when grouping by categorical dimensions (e.g., by city, by model).
 3. If the tool returns data, interpret it and answer the user's question in natural language.
 4. If the data is empty, state that clearly.
 5. If the user asks for analysis, provide insights based on the returned data.

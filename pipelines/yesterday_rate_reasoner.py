@@ -192,7 +192,7 @@ def _toolbox_for_high_risk(date_range: str, compare_date_range: str = None) -> L
             "tool": "trend",
             "parameters": {"metric": "sales", "date_range": "last_30_days", "time_grain": "day"},
         },
-        # 3. 核心转化率分布定位 (近 365 天分布，定位当前水位)
+        # 3. 核心比率分布定位 (近 365 天分布，定位当前水位)
         {
             "id": "rate_dist_30d",
             "tool": "distribution",
@@ -202,6 +202,11 @@ def _toolbox_for_high_risk(date_range: str, compare_date_range: str = None) -> L
             "id": "rate_dist_store_share_30d",
             "tool": "distribution",
             "parameters": {"metric": "assign_store_leads_ratio", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
+        },
+        {
+            "id": "rate_dist_avg_leads_per_store_30d",
+            "tool": "distribution",
+            "parameters": {"metric": "avg_daily_leads_per_store", "date_range": "yesterday", "compare_date_range": "last_365_days", "bins": 20, "return_buckets": False},
         },
         {
             "id": "rate_dist_7d_lock_30d",
@@ -266,9 +271,10 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         "    - **store_leads**: 门店线索数 (assign_store_leads) 的环比变化。\n"
         "    - **leads_wow**: 总线索数 (assign_leads) 的周同比变化 (WoW)。\n"
         "    - **store_leads_wow**: 门店线索数 (assign_store_leads) 的周同比变化 (WoW)。\n"
-        "- **rate_trend**: 包含 3 组转化率及 1 组结构占比在近 365 天历史分布中的定位（Distribution Check）：\n"
+        "- **rate_trend**: 包含 3 组转化率及 2 组结构/强度指标在近 365 天历史分布中的定位（Distribution Check）：\n"
         "    - **30d**: 门店线索当日锁单率 (assign_store_structure)\n"
         "    - **store_share_30d**: 门店线索占比 (assign_store_leads_ratio)\n"
+        "    - **avg_leads_per_store_30d**: 店均日均线索数 (avg_daily_leads_per_store) —— *注意：此为强度指标*\n"
         "    - **7d_lock_30d**: 7日锁单率 (assign_rate_7d_lock)\n"
         "    - **7d_drive_30d**: 7日试驾率 (assign_rate_7d_test_drive)\n"
         "- **signals**: 包含系统自动识别的异常信号。\n\n"
@@ -281,7 +287,7 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         "请按以下顺序逐项检查，**仅展示有问题（High Risk）的项**，若某项正常（如波动在合理范围内）则**直接省略**，保持报告极简。\n"
         "**1. 结构偏移 (Structure Check)**：[检查 sales_orders.structure。若 SAD > 0.1，指出具体的偏移因子。例：“车型结构偏移(SAD=0.34)，主因 LS9 占比回落(-14pct)被 CM2(+13pct)挤占。”]\n"
         "**2. 趋势断层 (Sales Trend Check)**：[检查 sales_orders.trend。观察 30 天趋势线，若呈现急剧下行或处于低位，指出具体形态。引用环比跌幅时务必使用 `yesterday_change` 字段。例：“LS9 销量处于上市退坡后的低位震荡期，日环比微跌 5%。”]\n"
-        "**3. 转化率水位 (Rate Position Check)**：[检查 rate_trend 中的分布定位 (position)。若任一指标处于历史低位（如 P<10 或 低于历史均值-1σ），明确指出百分位 (Percentile)。特别注意门店线索占比 (store_share_30d) 的异常分布。例：“门店线索当日锁单率与7日试驾率均处于历史极低水位(P<5)，表明流量质量或承接能力出现系统性下滑。”]\n"
+        "**3. 比率水位 (Rate & Intensity Check)**：[检查 rate_trend 中的分布定位。若任一指标处于低位(P<10)，**必须精确列出具体指标名称**（如“门店当日锁单率”、“7日试驾率”），**禁止**使用“转化率全面低”或“锁单率”等模糊表述。同时**必须**报告店均线索数 (avg_leads_per_store) 的水位以辅助归因。例：“**门店当日锁单率**(P4)与**7日试驾率**(P7)双低，但**店均线索数**(P55)正常，排除过载因素。”]\n"
         "**4. 线索归因 (Leads Impact Check)**：[检查 leads_trend。若总线索 (total_leads) 或 门店线索 (store_leads) 任一发生显著波动（如跌幅 > 10%），则必须进行归因分析。检查总线索波动是否由门店线索导致，并对比 WoW 数据 (leads_wow, store_leads_wow) 确认是否为周期性波动。例：“总线索量环比下跌 4%，但门店线索大幅萎缩 (-26%) 且 WoW 同步下跌 20%，表明非周期性的渠道异常。”]\n\n"
         "## 💡 归因综述\n"
         "[基于上述检出的异常项，用一句话逻辑闭环解释核心转化率异常的原因。例：“LS9 上市退坡导致高转化客群流失，叠加长期转化率下行趋势，导致今日转化率击穿历史极值。”]\n\n"
@@ -338,32 +344,6 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
     stats = _compute_today_and_history(dm, target_date, h_start, h_end)
     structure_risk = assess_structure_risk(stats, z_high=float(args.z_threshold), z_mid=float(args.z_mid))
     conditional = conditional_rate_assessment(stats, window=float(args.share_window))
-    lifecycle_finish_signals = []
-    try:
-        with open("/Users/zihao_/Documents/github/W52_reasoning/world/business_definition.json", "r", encoding="utf-8") as f:
-            config = json.load(f)
-        tps = config.get("time_periods", {})
-        for series, period in tps.items():
-            end_str = period.get("end")
-            finish_str = period.get("finish")
-            if not end_str or not finish_str:
-                continue
-            end_date = pd.to_datetime(end_str, errors="coerce")
-            finish_date = pd.to_datetime(finish_str, errors="coerce")
-            if pd.isna(end_date) or pd.isna(finish_date):
-                continue
-            if finish_date.normalize() + pd.Timedelta(days=31) <= target_date <= finish_date.normalize() + pd.Timedelta(days=60):
-                days_since_finish = int((target_date - finish_date.normalize()).days)
-                lifecycle_finish_signals.append({
-                    "type": "lifecycle_finish_window",
-                    "series": series,
-                    "end": str(end_date.date()),
-                    "finish": str(finish_date.date()),
-                    "days_since_finish": days_since_finish,
-                    "date_range": date_range,
-                })
-    except Exception:
-        pass
     final_state["results"]["assign_structure"] = {
         "today": stats["today"],
         "history_window": {"start": str(h_start.date()), "end": str(h_end.date())},
@@ -381,7 +361,6 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
             "date_range": date_range,
         }
     )
-    final_state["signals"].extend(lifecycle_finish_signals)
     if structure_risk["risk_level"] == "高":
         toolbox = _toolbox_for_high_risk(date_range, history_range_str)
         print("⚙️ 高风险触发：调度工具箱进行排查")
@@ -422,10 +401,6 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
     if "assign_leads_mom" in final_state["results"]:
         leads_trend["total_leads"] = final_state["results"]["assign_leads_mom"]
     
-    # 1. Add lifecycle check to sales_trend
-    if "lifecycle_check" in final_state["results"]:
-        sales_trend["lifecycle"] = final_state["results"]["lifecycle_check"]
-
     # 3. Split toolbox results if available
     if "toolbox_analysis" in final_state["results"]:
         for k, v in final_state["results"]["toolbox_analysis"].items():

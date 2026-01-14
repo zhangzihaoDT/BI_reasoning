@@ -458,3 +458,38 @@ graph TD
 3.  **Token Efficiency (成本优化)**:
     - 在无异常的平稳期，系统跳过所有深层工具调用，Token 消耗降低 60% 以上。
     - 仅在“刀刃上”花钱，确保高风险日期的诊断深度。
+
+### 详细执行逻辑 (Step-by-Step Logic)
+
+1.  **Baseline Scan (基准扫描)**:
+
+    - 执行 3 个基础 DSL 任务：`assign_leads_mom` (线索总量环比), `assign_rate_7d_lock` (7 日锁单率), `assign_rate_7d_test_drive` (7 日试驾率)。
+    - 目的：获取最基础的“体温”指标。
+
+2.  **Risk Assessment (风险评估)**:
+
+    - 计算今日的 **门店线索占比** (`store_share`) 和 **门店当日锁单率** (`store_rate`)。
+    - **Z-Score 判定**：基于历史 60 天数据计算 Z 分数。若任意指标 `abs(Z) >= 2.0`，判定为 `High Risk`；若 `abs(Z) >= 1.2`，判定为 `Mid Risk`。
+    - **Conditional Check**：寻找历史上 `store_share` 相似（±5% 窗口）的日期，构建“当前线索结构下的理论转化率基准”，用于辅助判断是否为结构性问题。
+
+3.  **Level 1 Trigger: High Risk Toolbox (高风险工具箱)**:
+
+    - **触发条件**：Risk Level = `High`。
+    - **执行任务**：
+      - **结构分布**：`sales_dist_by_series` (车型结构 SAD 分析)。
+      - **趋势形态**：`sales_trend_30d` (30 天销量趋势，识别退坡/爬坡)。
+      - **水位定位**：对 5 个核心指标（门店锁单率、门店线索占比、店均线索强度、7 日锁单率、7 日试驾率）进行近 365 天的分布定位 (Percentile)，确定当前指标的历史水位。
+      - **线索异动**：`assign_trend_store_leads` (门店线索环比)。
+
+4.  **Level 2 Trigger: WoW Analysis (周同比分析)**:
+
+    - **触发条件**：Level 1 已触发 且 门店线索环比变化 `abs(change_pct) >= 10%`。
+    - **执行任务**：
+      - `assign_trend_store_leads_wow` (门店线索周同比)。
+      - `assign_trend_leads_wow` (总线索周同比)。
+    - **目的**：区分是“周期性波动”（如周末效应）还是“非周期性异常”。
+
+5.  **DeepSeek Reasoner Synthesis (推理总结)**:
+    - 将上述所有层级的数据打包为 JSON Payload (`core`, `sales_orders`, `leads_trend`, `rate_trend`, `signals`)。
+    - 调用 `deepseek-reasoner` 模型，配合“高密度诊断专家” Prompt。
+    - 输出包含 **风险定性**、**异常 Checklist** (仅展示异常项) 和 **归因闭环** 的极简报告。

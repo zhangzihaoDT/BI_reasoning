@@ -51,6 +51,9 @@ def calculate_risk(signals: List[Dict]) -> Dict[str, Any]:
     reasons = []
 
     for signal in signals:
+        if not isinstance(signal, dict):
+            continue
+
         if signal.get('type') == 'anomaly_decision':
             if signal.get('anomaly_detected'):
                 risk_score += 2
@@ -68,6 +71,10 @@ def calculate_risk(signals: List[Dict]) -> Dict[str, Any]:
              if signal.get('status') == 'warning':
                 risk_score += 1
                 reasons.append(f"数据质量: {signal.get('message')}")
+        
+        elif signal.get('type') == 'lifecycle_signal':
+            risk_score += 1
+            reasons.append(f"生命周期: {signal.get('message')}")
 
     if risk_score == 0:
         level = "Low"

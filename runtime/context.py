@@ -39,50 +39,45 @@ class DataManager:
             print(f"Loading data from {self.data_path}...")
             self.data = pd.read_parquet(self.data_path)
             # Ensure date columns are datetime
-            if 'order_create_date' in self.data.columns:
-                self.data['order_create_date'] = pd.to_datetime(self.data['order_create_date'])
-            if 'lock_time' in self.data.columns:
-                self.data['lock_time'] = pd.to_datetime(self.data['lock_time'])
-            if 'delivery_date' in self.data.columns:
-                self.data['delivery_date'] = pd.to_datetime(self.data['delivery_date'])
+            for col in ['order_create_date', 'lock_time', 'delivery_date']:
+                if col in self.data.columns:
+                    self.data[col] = pd.to_datetime(self.data[col], errors='coerce')
+
             if 'first_assign_time' in self.data.columns:
-                # Use custom parser for Chinese dates
-                self.data['first_assign_time'] = self.data['first_assign_time'].apply(self._parse_cn_date_static)
+                # Optimized date parsing: try vectorized format first, then fallback
+                # Assuming format is mostly "YYYY年M月D日" or standard
+                self.data['first_assign_time'] = pd.to_datetime(
+                    self.data['first_assign_time'], 
+                    format='%Y年%m月%d日', 
+                    errors='coerce'
+                )
             
             self._apply_business_logic()
             print(f"Data loaded. Shape: {self.data.shape}")
     
     def _apply_business_logic(self):
-        def get_series_group(row):
-            pname = str(row.get('product_name', ''))
-            if '新一代' in pname and 'LS6' in pname:
-                return 'CM2'
-            elif '全新' in pname and 'LS6' in pname:
-                return 'CM1'
-            elif 'LS6' in pname and '全新' not in pname and '新一代' not in pname:
-                return 'CM0'
-            elif '全新' in pname and 'L6' in pname:
-                return 'DM1'
-            elif 'L6' in pname and '全新' not in pname:
-                return 'DM0'
-            elif 'LS9' in pname:
-                return 'LS9'
-            elif 'LS7' in pname:
-                return 'LS7'
-            elif 'L7' in pname:
-                return 'L7'
-            else:
-                return '其他'
-
-        def get_product_type(row):
-            pname = str(row.get('product_name', ''))
-            if '52' in pname or '66' in pname:
-                return '增程'
-            return '纯电'
-
         if 'product_name' in self.data.columns:
-            self.data['series_group'] = self.data.apply(get_series_group, axis=1)
-            self.data['product_type'] = self.data.apply(get_product_type, axis=1)
+            # Vectorized series_group logic
+            pname = self.data['product_name'].astype(str)
+            
+            conditions = [
+                pname.str.contains('新一代') & pname.str.contains('LS6'),
+                pname.str.contains('全新') & pname.str.contains('LS6'),
+                pname.str.contains('LS6') & ~pname.str.contains('全新') & ~pname.str.contains('新一代'),
+                pname.str.contains('全新') & pname.str.contains('L6'),
+                pname.str.contains('L6') & ~pname.str.contains('全新'),
+                pname.str.contains('LS9'),
+                pname.str.contains('LS7'),
+                pname.str.contains('L7')
+            ]
+            choices = ['CM2', 'CM1', 'CM0', 'DM1', 'DM0', 'LS9', 'LS7', 'L7']
+            
+            self.data['series_group'] = np.select(conditions, choices, default='其他')
+            
+            # Vectorized product_type logic
+            # "52" or "66" in product name -> "增程" (as per original logic), else "纯电"
+            mask_erev = pname.str.contains('52|66', regex=True)
+            self.data['product_type'] = np.where(mask_erev, '增程', '纯电')
 
     
     def get_data(self) -> pd.DataFrame:

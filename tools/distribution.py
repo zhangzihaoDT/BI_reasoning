@@ -75,6 +75,7 @@ class DistributionTool(BaseTool):
                 "assign_store_structure": ("下发线索当日锁单数 (门店)", "下发线索数 (门店)"),
                 "assign_rate_7d_lock": ("下发线索 7 日锁单数", "下发线索数"),
                 "assign_rate_7d_test_drive": ("下发线索 7 日试驾数", "下发线索数"),
+                "avg_daily_leads_per_store": ("下发线索数", "下发门店数"),
             }
             
             if metric_expr in assign_rate_map:
