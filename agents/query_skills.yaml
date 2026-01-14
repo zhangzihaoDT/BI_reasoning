@@ -1,0 +1,224 @@
+version: 1.0
+description: >
+  Skills and rules for the Query Agent to map natural language to data query tools.
+
+# =========================
+# Metric Definitions
+# =========================
+metrics:
+  - name: 锁单量
+    aliases: [锁单数, 锁单, 销量, 订单量, 订单数, sales]
+    description: Number of locked orders (lock_time not null).
+    tool_metric: 锁单量
+
+  - name: 交付数
+    aliases: [交付量, 交付, 提车数, delivery]
+    description: Number of delivered orders (delivery_date not null).
+    tool_metric: 交付数
+
+  - name: 开票量
+    aliases: [开票数, 开票单数, invoice count]
+    description: Number of invoiced orders.
+    tool_metric: 开票量
+
+  - name: 开票金额
+    aliases: [开票额, 营收, invoice amount]
+    description: Total amount of invoiced orders.
+    tool_metric: 开票金额
+
+  - name: 小订数
+    aliases: [小订量, 意向金, 小定, intention]
+    description: Number of intention orders.
+    tool_metric: 小订数
+
+# =========================
+# Dimension & Filter Mappings
+# =========================
+dimensions:
+  - name: series
+    aliases: [车系, 系列]
+    values: [LS6, LS9, LS7, L7, L6]
+    filter_field: series
+
+  - name: series_group
+    aliases: [车型, 车型分组, model]
+    values: [CM2, CM1, CM0, DM1, DM0, LS9, LS7, L7]
+    filter_field: series_group
+
+  - name: product_type
+    aliases: [动力类型, 能源类型, type]
+    values: [增程, 纯电]
+    filter_field: product_type
+
+  - name: store_city
+    aliases: [城市, 市, city]
+    filter_field: store_city
+
+  - name: license_city
+    aliases: [上牌城市, 牌照城市, license city]
+    filter_field: license_city
+
+  - name: parent_region_name
+    aliases: [大区, 区域, region]
+    filter_field: parent_region_name
+
+  - name: store_name
+    aliases: [门店, 店, store]
+    filter_field: store_name
+
+  - name: first_middle_channel_name
+    aliases: [渠道, channel]
+    filter_field: first_middle_channel_name
+
+  - name: gender
+    aliases: [性别, 男女]
+    values: [男, 女]
+    filter_field: gender
+
+  - name: age_band
+    aliases: [年龄段, 年龄]
+    filter_field: age_band
+
+# =========================
+# Tool Selection Rules
+# =========================
+rules:
+  - rule: 'Single Number Query'
+    condition: 'User asks for a single aggregated number without grouping.'
+    tool: query
+    parameters:
+      metric: 'extracted from query'
+      date_range: 'extracted from query (default: yesterday)'
+
+  - rule: 'Series vs Series Group'
+    condition: 'User mentions car series like LS6, L6, LS7, LS9.'
+    tool: any
+    parameters:
+      filters:
+        - field: series
+          op: '='
+          value: 'extracted series name (e.g., LS6)'
+      # Do NOT use series_group for LS6/L6 unless user explicitly asks for CM/DM codes.
+
+  - rule: 'Fuzzy Matching for Cities/Stores'
+    condition: "User asks for city, store, or channel names (e.g., 'Shanghai', 'Hangzhou store')."
+    tool: any
+    parameters:
+      filters:
+        - field: 'relevant field (store_city, license_city, store_name, etc.)'
+          op: 'contains'
+          value: 'extracted name (without "市" or "店" if ambiguous)'
+
+  - rule: 'Breakdown/Rollup Query'
+    condition: "User asks for breakdown by a dimension (e.g., 'by city', 'each model', 'distribution')."
+    tool: rollup
+    parameters:
+      metric: 'extracted from query'
+      date_range: 'extracted from query'
+      dimension: 'extracted dimension (must be one of the allowed dimensions)'
+
+  - rule: 'Time Series / Trend Query'
+    condition: "User asks for trend, daily, monthly, or changes over time (e.g., 'monthly sales', 'daily trend', 'every month')."
+    tool: query
+    parameters:
+      metric: 'extracted from query'
+      date_range: 'extracted from query'
+      interval: 'extracted interval (day, week, month, year)'
+
+# =========================
+# Few-Shot Examples
+# =========================
+examples:
+  - user: '昨日锁单数'
+    tool: query
+    parameters:
+      metric: 锁单量
+      date_range: yesterday
+
+  - user: 'LS6 增程 2025年每个月 的开票数'
+    tool: query
+    parameters:
+      metric: 开票量
+      date_range: '2025'
+      filters:
+        - field: series
+          op: '='
+          value: LS6
+        - field: product_type
+          op: '='
+          value: 增程
+      interval: month
+
+  - user: 'LS9 2025年12月交付数'
+    tool: query
+    parameters:
+      metric: 交付数
+      date_range: '2025-12'
+      filters:
+        - field: series
+          op: '='
+          value: LS9
+
+  - user: 'LS6 增程 2025年12月 开票数'
+    tool: query
+    parameters:
+      metric: 开票量
+      date_range: '2025-12'
+      filters:
+        - field: series
+          op: '='
+          value: LS6
+        - field: product_type
+          op: '='
+          value: 增程
+
+  - user: 'LS9 2025年12月交付数 按城市'
+    tool: rollup
+    parameters:
+      metric: 交付数
+      date_range: '2025-12'
+      filters:
+        - field: series
+          op: '='
+          value: LS9
+      dimension: store_city
+
+  - user: 'LS6, LS9 2025年12月分别锁单多少'
+    tool: rollup
+    parameters:
+      metric: 锁单量
+      date_range: '2025-12'
+      filters:
+        - field: series
+          op: 'in'
+          value: [LS6, LS9]
+      dimension: series
+
+  - user: '2025年12月车型为 CM2 增程的锁单量?'
+    tool: query
+    parameters:
+      metric: 锁单量
+      date_range: '2025-12'
+      filters:
+        - field: series_group
+          op: '='
+          value: CM2
+        - field: product_type
+          op: '='
+          value: 增程
+
+  - user: 'LS6纯电 2025年12月 license_city为上海的开票数'
+    tool: query
+    parameters:
+      metric: 开票量
+      date_range: '2025-12'
+      filters:
+        - field: series
+          op: '='
+          value: LS6
+        - field: product_type
+          op: '='
+          value: 纯电
+        - field: license_city
+          op: 'contains'
+          value: 上海

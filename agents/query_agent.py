@@ -16,6 +16,7 @@ class QueryAgent:
             
         self.schema_path = os.path.join(self.base_dir, "world", "schema.md")
         self.business_def_path = os.path.join(self.base_dir, "world", "business_definition.json")
+        self.query_skills_path = os.path.join(self.base_dir, "agents", "query_skills.yaml")
         self.env_path = os.path.join(self.base_dir, ".env")
         
         self.api_key = self._load_api_key()
@@ -38,6 +39,11 @@ class QueryAgent:
             context['schema'] = f.read()
         with open(self.business_def_path, 'r', encoding='utf-8') as f:
             context['business_def'] = f.read()
+        if os.path.exists(self.query_skills_path):
+            with open(self.query_skills_path, 'r', encoding='utf-8') as f:
+                context['query_skills'] = f.read()
+        else:
+            context['query_skills'] = ""
         return context
 
     def _call_llm(self, system_prompt, user_prompt):
@@ -78,7 +84,12 @@ class QueryAgent:
         print(f"🤖 QueryAgent received: {query}")
 
         today = datetime.date.today().strftime("%Y-%m-%d")
-        system_prompt = f"""
+        
+        # Construct prompt using query_skills.yaml if available, else fallback to hardcoded
+        skills_content = self.context.get('query_skills', '')
+        
+        if skills_content:
+            system_prompt = f"""
 You are a Data Query Assistant. Your ONLY goal is to convert natural language into a tool call JSON for data querying.
 You are NOT an analyst. You do NOT answer questions directly. You ONLY output JSON (no markdown).
 
@@ -97,7 +108,36 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
     "date_range": "date_range_string",
     "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
     "dimension": "dimension_for_rollup_optional",
-    "dimensions": ["dimension1","dimension2"]
+    "dimensions": ["dimension1","dimension2"],
+    "interval": "day/week/month/year"
+  }}
+}}
+
+**Skills & Rules:**
+{skills_content}
+"""
+        else:
+            system_prompt = f"""
+You are a Data Query Assistant. Your ONLY goal is to convert natural language into a tool call JSON for data querying.
+You are NOT an analyst. You do NOT answer questions directly. You ONLY output JSON (no markdown).
+
+**Context:**
+- Today's date: {today}
+- Schema:
+{self.context['schema']}
+- Business Definitions:
+{self.context['business_def']}
+
+**Output JSON Format (always):**
+{{
+  "tool": "query_or_rollup",
+  "parameters": {{
+    "metric": "metric_name",
+    "date_range": "date_range_string",
+    "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
+    "dimension": "dimension_for_rollup_optional",
+    "dimensions": ["dimension1","dimension2"],
+    "interval": "day/week/month/year"
   }}
 }}
 
