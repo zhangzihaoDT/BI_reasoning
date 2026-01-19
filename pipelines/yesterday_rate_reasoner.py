@@ -21,6 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.execution_graph import build_execution_graph
 from runtime.context import DataManager
+from runtime.signals import classify_anomaly_from_stats
 
 
 def _safe_rate(n: float, d: float) -> float:
@@ -102,13 +103,27 @@ def assess_structure_risk(stats: Dict[str, Any], z_high: float, z_mid: float) ->
     share_std = float(np.std(share_values, ddof=1)) if share_values.size > 1 else 0.0
     rate_mean = float(np.mean(rate_values)) if rate_values.size > 0 else 0.0
     rate_std = float(np.std(rate_values, ddof=1)) if rate_values.size > 1 else 0.0
-    share_z = float((today_share - share_mean) / share_std) if share_std > 0 else 0.0
-    rate_z = float((today_store_rate - rate_mean) / rate_std) if rate_std > 0 else 0.0
+    share_decision = classify_anomaly_from_stats(
+        value=today_share,
+        mean=share_mean,
+        std=share_std if share_std > 0 else 0.0,
+    )
+    rate_decision = classify_anomaly_from_stats(
+        value=today_store_rate,
+        mean=rate_mean,
+        std=rate_std if rate_std > 0 else 0.0,
+    )
+    share_z = float(share_decision.get("z", 0.0))
+    rate_z = float(rate_decision.get("z", 0.0))
     risk_level = "低"
     flag = "正常结构"
-    if abs(share_z) >= z_high or abs(rate_z) >= z_high:
-        risk_level = "高"
-        flag = "结构性异常"
+    if share_decision.get("anomaly_detected") or rate_decision.get("anomaly_detected"):
+        if share_decision.get("flag") == "结构性异常" or rate_decision.get("flag") == "结构性异常":
+            risk_level = "高"
+            flag = "结构性异常"
+        else:
+            risk_level = "中"
+            flag = "趋势性偏离"
     elif abs(share_z) >= z_mid or abs(rate_z) >= z_mid:
         risk_level = "中"
         flag = "趋势性偏离"
@@ -280,8 +295,17 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         "- **signals**: 包含系统自动识别的异常信号。\n\n"
         "严格遵循以下格式和原则：\n"
         "1. **格式模板**：\n"
-        "## 🟢/🔴 诊断结论：风险 [Low/High]\n"
-        "**核心数据**：[基于 core 数据，指出转化率绝对值及偏离度，如“门店线索当日锁单率0.75% (Z-score -2.44)”；若门店线索占比有显著偏离也需指出，如“门店线索占比激增(Z=3.1)”]。\n"
+        "- 标题中的风险标签必须严格来源于 `core.structure_risk.risk_level` 字段，其取值仅允许为“高”“中”“低”。你不得根据主观判断修改该标签。\n"
+        "- 请按照如下映射生成标题行（包括图标和文案）：\n"
+        "  - 若 risk_level == \"高\"：标题必须为 `## 🔴 诊断结论：风险 [高]`\n"
+        "  - 若 risk_level == \"中\"：标题必须为 `## 🟡 诊断结论：风险 [中]`\n"
+        "  - 若 risk_level == \"低\"：标题必须为 `## 🟢 诊断结论：风险 [低]`\n"
+        "- 标题行禁止使用除上述三种格式以外的任何变体（包括 High/Low 文案或其他 emoji）。\n"
+        "**核心数据**：\n"
+        "- 所有涉及“门店线索当日锁单率”的绝对数值，必须直接来自 `core.structure_risk.store_rate` 字段，将该数值格式化为百分比后输出（例如 store_rate*100 保留两位小数），严禁自行估算或编造。\n"
+        "- 括号中的 Z-score 必须直接使用 `core.structure_risk.rate_z` 字段的值。\n"
+        "- 若提及“门店线索占比”的 Z 值，必须直接使用 `core.structure_risk.share_z` 字段，不得另行推算。\n"
+        "- 若门店线索占比有显著偏离，也需指出，如“门店线索占比激增(Z=3.1)”。\n"
         "**风险判定**：[一句话定性，如“门店线索当日锁单率显著低于历史均值，构成结构性异常”]。\n\n"
         "## 🔍 逐项排查 (Checklist)\n"
         "请按以下顺序逐项检查，**仅展示有问题（High Risk）的项**，若某项正常（如波动在合理范围内）则**直接省略**，保持报告极简。\n"
@@ -320,7 +344,7 @@ def _call_deepseek_reasoner(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         return f"Error calling API: {str(e)}", {}
 
 
-def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, Any]:
+def analyze_point(target_date_str: str, args: argparse.Namespace, use_reasoner: bool = True) -> Dict[str, Any]:
     dm = DataManager()
     today = pd.Timestamp.now().normalize()
     if target_date_str == "yesterday":
@@ -419,37 +443,93 @@ def analyze_point(target_date_str: str, args: argparse.Namespace) -> Dict[str, A
             else:
                 pass
 
-    payload = {
-        "date": date_range,
-        "core": final_state["results"].get("assign_structure", {}),
-        "sales_orders": {
-            "structure": sales_structure,
-            "trend": sales_trend
-        },
-        "leads_trend": leads_trend,
-        "rate_trend": rate_trend,
-        "signals": final_state["signals"],
-    }
-    
-    report, metrics = _call_deepseek_reasoner(payload)
-    final_state["results"]["reasoner_report"] = report
-    final_state["results"]["reasoner_metrics"] = metrics
+    if use_reasoner:
+        payload = {
+            "date": date_range,
+            "core": final_state["results"].get("assign_structure", {}),
+            "sales_orders": {
+                "structure": sales_structure,
+                "trend": sales_trend
+            },
+            "leads_trend": leads_trend,
+            "rate_trend": rate_trend,
+            "signals": final_state["signals"],
+        }
+        report, metrics = _call_deepseek_reasoner(payload)
+        final_state["results"]["reasoner_report"] = report
+        final_state["results"]["reasoner_metrics"] = metrics
     return final_state
+
+
+def analyze_range(start_date: str, end_date: str, args: argparse.Namespace) -> None:
+    print(f"🚀 Structure Risk Trajectory Analysis (No per-day LLM): {start_date} to {end_date}")
+    s = pd.to_datetime(start_date)
+    e = pd.to_datetime(end_date)
+    dates = pd.date_range(start=s, end=e, freq="D")
+    trajectory: List[Dict[str, Any]] = []
+    for d in dates:
+        d_str = d.strftime("%Y-%m-%d")
+        state = analyze_point(d_str, args, use_reasoner=False)
+        structure = state["results"].get("assign_structure", {})
+        risk = structure.get("structure_risk", {})
+        risk_level = risk.get("risk_level", "低")
+        flag = risk.get("flag", "")
+        share_z = float(risk.get("share_z", 0.0))
+        rate_z = float(risk.get("rate_z", 0.0))
+        today = structure.get("today", {})
+        trajectory.append(
+            {
+                "date": d_str,
+                "risk_level": risk_level,
+                "flag": flag,
+                "share_z": share_z,
+                "rate_z": rate_z,
+                "today": today,
+            }
+        )
+        icon = {"低": "🟢", "中": "🟡", "高": "🔴"}.get(risk_level, "❓")
+        print(f"{icon} {d_str} 结构风险：{risk_level} ({flag}) share_z={share_z:.2f}, rate_z={rate_z:.2f}")
+    payload = {
+        "date": f"{start_date}/{end_date}",
+        "core": {
+            "mode": "trajectory",
+            "range": {"start": start_date, "end": end_date},
+            "daily_structure_risk": trajectory,
+        },
+        "sales_orders": {},
+        "leads_trend": {},
+        "rate_trend": {},
+        "signals": [],
+    }
+    print("\n" + "=" * 50)
+    print(f"📊 Assign Structure Reasoner Trajectory Report ({start_date} ~ {end_date})")
+    print("=" * 50)
+    report, _metrics = _call_deepseek_reasoner(payload)
+    print(report)
+    print("\n" + "=" * 50)
+    print(f"📅 区间结构风险轨迹汇总 ({start_date} ~ {end_date})")
+    print("=" * 50)
+    total = len(trajectory)
+    high_days = [t for t in trajectory if t["risk_level"] == "高"]
+    mid_days = [t for t in trajectory if t["risk_level"] == "中"]
+    print(f"共分析 {total} 天")
+    print(f"🔴 高风险天数: {len(high_days)}")
+    print(f"🟡 中风险天数: {len(mid_days)}")
+    if high_days:
+        print("\n⚠️ 高风险日期详情:")
+        for t in high_days:
+            print(
+                f"  - {t['date']}: {t['flag']} "
+                f"(share_z={t['share_z']:.2f}, rate_z={t['rate_z']:.2f})"
+            )
+    else:
+        print("\n✅ 区间内未检出高风险结构异常。")
 
 
 def main() -> None:
     args = _parse_args()
     if args.start and args.end:
-        s = pd.to_datetime(args.start)
-        e = pd.to_datetime(args.end)
-        dates = pd.date_range(start=s, end=e, freq="D")
-        for d in dates:
-            d_str = d.strftime("%Y-%m-%d")
-            state = analyze_point(d_str, args)
-            print("\n" + "=" * 50)
-            print(f"📊 Assign Structure Reasoner Report ({d_str})")
-            print("=" * 50)
-            print(state["results"].get("reasoner_report", ""))
+        analyze_range(args.start, args.end, args)
     elif args.date:
         state = analyze_point(args.date, args)
         print("\n" + "=" * 50)
