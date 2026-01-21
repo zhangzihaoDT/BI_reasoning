@@ -1,4 +1,6 @@
 # tools/query.py
+import json
+import os
 from tools.base import BaseTool
 from runtime.context import DataManager
 import pandas as pd
@@ -25,6 +27,18 @@ class QueryTool(BaseTool):
         date_range = params.get("date_range")
         metric = params.get("metric")
         filters = params.get("filters")
+
+        # Load business definition for age limits
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        biz_def_path = os.path.join(base_dir, "world", "business_definition.json")
+        age_limit = [18, 80]
+        if os.path.exists(biz_def_path):
+            try:
+                with open(biz_def_path, 'r', encoding='utf-8') as f:
+                    biz_def = json.load(f)
+                    age_limit = biz_def.get("age_limit", [18, 80])
+            except Exception:
+                pass
 
         dm = DataManager()
 
@@ -69,6 +83,8 @@ class QueryTool(BaseTool):
                     _df = _df[_df[field].isin(values)]
                 elif op == "contains":
                     _df = _df[_df[field].astype(str).str.contains(str(value), na=False)]
+                elif op in ["not_null", "notna", "exists", "is not null", "not null", "is_not_null"]:
+                    _df = _df[_df[field].notna()]
                 elif op in [">", ">=", "<", "<="]:
                     s = pd.to_numeric(_df[field], errors="coerce")
                     v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
@@ -96,6 +112,16 @@ class QueryTool(BaseTool):
                 df = df[df["invoice_upload_time"].notna()]
         elif metric in ["小订数", "小订量"] and "intention_payment_time" in df.columns:
             df = df[df["intention_payment_time"].notna()]
+        elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
+            df = df[df["age"].notna()]
+            # Apply business rule age filter
+            df["age"] = pd.to_numeric(df["age"], errors="coerce")
+            df = df[(df["age"] >= age_limit[0]) & (df["age"] <= age_limit[1])]
+            
+            # Record implicit filter for display
+            if filters is None:
+                filters = []
+            filters.append({"field": "age", "op": "between", "value": age_limit})
 
         interval = params.get("interval")
         if interval and time_col in df.columns and not df.empty:
@@ -131,16 +157,28 @@ class QueryTool(BaseTool):
                     "value": result_dict,
                     "metric": metric,
                     "interval": interval,
+                    "sample_size": len(df),
+                    "filters": filters,
                     "signals": [],
                 }
 
+        sample_size = len(df)
+
         if metric in ["开票金额", "invoice_amount"] and "invoice_amount" in df.columns:
             value = float(pd.to_numeric(df["invoice_amount"], errors="coerce").fillna(0).sum())
+        elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
+            value = float(pd.to_numeric(df["age"], errors="coerce").mean())
+            if pd.isna(value):
+                value = 0.0
+            else:
+                value = round(value, 1)
         else:
             value = int(len(df))
 
         return {
             "value": value,
             "metric": metric,
+            "sample_size": sample_size,
+            "filters": filters,
             "signals": [],
         }

@@ -1,3 +1,5 @@
+import json
+import os
 from typing import Any, Dict, List
 import pandas as pd
 
@@ -18,6 +20,18 @@ class RollupTool(BaseTool):
         dimensions = params.get("dimensions")
         date_range = params.get("date_range")
         filters = params.get("filters")
+
+        # Load business definition for age limits
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        biz_def_path = os.path.join(base_dir, "world", "business_definition.json")
+        age_limit = [18, 80]
+        if os.path.exists(biz_def_path):
+            try:
+                with open(biz_def_path, 'r', encoding='utf-8') as f:
+                    biz_def = json.load(f)
+                    age_limit = biz_def.get("age_limit", [18, 80])
+            except Exception:
+                pass
 
         dm = DataManager()
 
@@ -62,6 +76,8 @@ class RollupTool(BaseTool):
                     _df = _df[_df[field].isin(values)]
                 elif op == "contains":
                     _df = _df[_df[field].astype(str).str.contains(str(value), na=False)]
+                elif op in ["not_null", "notna", "exists", "is not null", "not null", "is_not_null"]:
+                    _df = _df[_df[field].notna()]
                 elif op in [">", ">=", "<", "<="]:
                     s = pd.to_numeric(_df[field], errors="coerce")
                     v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
@@ -89,6 +105,16 @@ class RollupTool(BaseTool):
                 df = df[df["invoice_upload_time"].notna()]
         elif metric in ["小订数", "小订量"] and "intention_payment_time" in df.columns:
             df = df[df["intention_payment_time"].notna()]
+        elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
+            df = df[df["age"].notna()]
+            # Apply business rule age filter
+            df["age"] = pd.to_numeric(df["age"], errors="coerce")
+            df = df[(df["age"] >= age_limit[0]) & (df["age"] <= age_limit[1])]
+            
+            # Record implicit filter for display
+            if filters is None:
+                filters = []
+            filters.append({"field": "age", "op": "between", "value": age_limit})
 
         rows: List[Dict[str, Any]] = []
         if dimensions and isinstance(dimensions, list):
@@ -117,6 +143,16 @@ class RollupTool(BaseTool):
                     row = {g: (None if pd.isna(val) else str(val)) for g, val in zip(valid_group_fields, idx)}
                     row["value"] = float(v)
                     rows.append(row)
+            elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
+                age_num = pd.to_numeric(df["age"], errors="coerce")
+                grouped = age_num.groupby([df[g] for g in valid_group_fields], observed=True).mean().sort_values(ascending=False)
+                rows = []
+                for idx, v in grouped.items():
+                    if not isinstance(idx, tuple):
+                        idx = (idx,)
+                    row = {g: (None if pd.isna(val) else str(val)) for g, val in zip(valid_group_fields, idx)}
+                    row["value"] = round(float(v), 1)
+                    rows.append(row)
             else:
                 grouped = df.groupby(valid_group_fields, observed=True).size().sort_values(ascending=False)
                 rows = []
@@ -131,6 +167,13 @@ class RollupTool(BaseTool):
             if metric in ["开票金额", "invoice_amount"] and "invoice_amount" in df.columns:
                 val = float(pd.to_numeric(df["invoice_amount"], errors="coerce").fillna(0).sum())
                 rows = [{"dimension": "All", "value": val}]
+            elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
+                val = float(pd.to_numeric(df["age"], errors="coerce").mean())
+                if pd.isna(val):
+                    val = 0.0
+                else:
+                    val = round(val, 1)
+                rows = [{"dimension": "All", "value": val}]
             else:
                 rows = [
                     {"dimension": "All", "value": len(df)},
@@ -141,6 +184,8 @@ class RollupTool(BaseTool):
             "dimension": dimension,
             "dimensions": dimensions,
             "date_range": date_range,
+            "sample_size": len(df),
+            "filters": filters,
             "rows": rows,
             "signals": [],
         }

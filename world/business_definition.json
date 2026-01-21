@@ -64,5 +64,6 @@
   "model_series_mapping": {
     "LS6": ["CM0", "CM1", "CM2"],
     "L6": ["DM0", "DM1"]
-  }
+  },
+  "age_limit": [18, 80]
 }

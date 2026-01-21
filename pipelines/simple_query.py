@@ -56,6 +56,16 @@ def display_result(result):
         value = result.get("value")
         print(f"🔢 {metric}: {value}")
 
+    # Metadata (Sample Size & Filters)
+    sample_size = result.get("sample_size")
+    filters = result.get("filters")
+    
+    if sample_size is not None:
+        print(f"📉 Sample Size: {sample_size}")
+    
+    if filters:
+        print(f"🔍 Filters: {json.dumps(filters, ensure_ascii=False)}")
+
     # Signals
     if result.get("signals"):
         print(f"\n⚠️ Signals: {json.dumps(result['signals'], ensure_ascii=False)}")

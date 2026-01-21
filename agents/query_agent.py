@@ -145,7 +145,7 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 - Choose tool:
   - Use "query" when user asks for a single number.
   - Use "rollup" when user asks for breakdown (contains "按/分/各/分别" or lists multiple values like "LS6,LS9").
-- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数 (or sales).
+- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数/年龄 (or sales/age).
 - date_range:
   - "昨日/昨天" -> "yesterday"
   - "last 7 days" -> "last_7_days"
@@ -158,6 +158,10 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
   - If query explicitly mentions a series_group key (CM2/CM1/CM0/DM1/DM0/LS9/LS7/L7/其他) together with "车型分组" or "series_group", use field="series_group".
   - If query contains product type words like "增程" or "纯电", use field="product_type" with "=".
   - If query contains city/region/store/channel names, add corresponding filters using "=" when exact, otherwise use "contains".
+  - If query implies population subset (e.g. "开票订单", "交付用户"), add filter field IS NOT NULL:
+    - "开票" -> {"field":"invoice_upload_time","op":"not_null","value":true}
+    - "交付" -> {"field":"delivery_date","op":"not_null","value":true}
+    - "锁单" -> {"field":"lock_time","op":"not_null","value":true}
 - rollup dimension allowed:
   - series, product_name, series_group, product_type, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
 
@@ -199,6 +203,28 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
 
         tool_name = extracted.get("tool") or "query"
         parameters = extracted.get("parameters") or {}
+
+        # Post-process parameters to ensure population filters are applied for Age queries
+        # This handles cases where LLM misses the instruction
+        metric = parameters.get("metric")
+        filters = parameters.get("filters", [])
+        q_lower = query.lower()
+        
+        if metric == "age" or "age" in str(metric).lower():
+            # Check if relevant filters already exist to avoid duplication
+            has_invoice = any(f.get("field") == "invoice_upload_time" for f in filters)
+            has_delivery = any(f.get("field") == "delivery_date" for f in filters)
+            has_lock = any(f.get("field") == "lock_time" for f in filters)
+            
+            if ("开票" in query or "invoice" in q_lower) and not has_invoice:
+                filters.append({"field": "invoice_upload_time", "op": "not_null", "value": True})
+            elif ("交付" in query or "delivery" in q_lower) and not has_delivery:
+                filters.append({"field": "delivery_date", "op": "not_null", "value": True})
+            elif ("锁单" in query or "lock" in q_lower) and not has_lock:
+                filters.append({"field": "lock_time", "op": "not_null", "value": True})
+            
+            parameters["filters"] = filters
+
         step = {"id": "query_action", "tool": tool_name, "parameters": parameters}
 
         tool = RollupTool() if tool_name == "rollup" else QueryTool()
@@ -222,6 +248,8 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
             metric = "开票量"
         elif any(k in q for k in ["小订数", "小订量", "意向金"]):
             metric = "小订数"
+        elif any(k in q for k in ["平均年龄", "年龄", "岁"]):
+            metric = "age"
         else:
             metric = "锁单量"
 
@@ -286,6 +314,15 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
             filters.append({"field": "product_type", "op": "=", "value": "增程"})
         elif "纯电" in q:
             filters.append({"field": "product_type", "op": "=", "value": "纯电"})
+            
+        # Population filters for Age query
+        if metric == "age":
+            if "开票" in q or "invoice" in q.lower():
+                filters.append({"field": "invoice_upload_time", "op": "not_null", "value": True})
+            elif "交付" in q or "delivery" in q.lower():
+                filters.append({"field": "delivery_date", "op": "not_null", "value": True})
+            elif "锁单" in q or "lock" in q.lower():
+                filters.append({"field": "lock_time", "op": "not_null", "value": True})
 
         tool = "rollup" if dimension else "query"
         parameters = {"metric": metric, "date_range": date_range}
