@@ -53,54 +53,37 @@ class QueryTool(BaseTool):
         elif metric in ["小订数", "小订量"]:
             time_col = "intention_payment_time"
 
-        df = dm.filter_data(date_range, time_col=time_col)
+        # Special handling for relative launch date:
+        # We need to pre-filter by series to allow filter_data to resolve "launch_plus_Nd"
+        # because filter_data needs to know WHICH series' launch date to use.
+        
+        # 1. Get raw data first (no date filter)
+        df = dm.get_data()
+        
+        # 2. Apply explicit filters (e.g. series=LS9)
+        df = dm.apply_filters(df, filters)
 
-        def _apply_filters(_df: pd.DataFrame, _filters):
-            if _df.empty or not _filters:
-                return _df
-
-            if isinstance(_filters, dict):
-                _filters = [{"field": k, "op": "=", "value": v} for k, v in _filters.items()]
-
-            if not isinstance(_filters, list):
-                return _df
-
-            for f in _filters:
-                if not isinstance(f, dict):
-                    continue
-                field = f.get("field")
-                op = (f.get("op") or "=").lower()
-                value = f.get("value")
-                if not field or field not in _df.columns:
-                    continue
-
-                if op in ["=", "=="]:
-                    _df = _df[_df[field] == value]
-                elif op in ["!=", "<>"]:
-                    _df = _df[_df[field] != value]
-                elif op == "in":
-                    values = value if isinstance(value, list) else [value]
-                    _df = _df[_df[field].isin(values)]
-                elif op == "contains":
-                    _df = _df[_df[field].astype(str).str.contains(str(value), na=False)]
-                elif op in ["not_null", "notna", "exists", "is not null", "not null", "is_not_null"]:
-                    _df = _df[_df[field].notna()]
-                elif op in [">", ">=", "<", "<="]:
-                    s = pd.to_numeric(_df[field], errors="coerce")
-                    v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-                    if pd.isna(v):
-                        continue
-                    if op == ">":
-                        _df = _df[s > v]
-                    elif op == ">=":
-                        _df = _df[s >= v]
-                    elif op == "<":
-                        _df = _df[s < v]
-                    elif op == "<=":
-                        _df = _df[s <= v]
-            return _df
-
-        df = _apply_filters(df, filters)
+        # 3. Now apply date filter (which might need series context)
+        # Note: We need to expose a new method or use filter_data carefully.
+        # Since filter_data takes date_range and returns filtered DF, 
+        # and our improved filter_data now checks the DF content for series.
+        # But wait, dm.filter_data calls dm.get_data() internally and filters IT.
+        # It does NOT take an existing DF.
+        # So we need to refactor or hack it. 
+        # Hack: Pass the pre-filtered DF to a new helper or modify filter_data to accept df?
+        # Actually, let's look at context.py again. filter_data calls get_data().
+        
+        # Strategy: 
+        # We can implement the logic here in QueryTool if it's specific to this flow, 
+        # OR we modify context.py to allow passing an external DF.
+        # Let's modify context.py to be more flexible.
+        
+        df = dm.filter_data_on_df(df, date_range, time_col=time_col)
+        
+        # 4. (Optional) Re-apply filters? No, already applied.
+        # But wait, standard flow was: dm.filter_data -> apply filters.
+        # Now we reversed it: apply filters -> dm.filter_data_on_df.
+        # This is better for performance anyway (filter series first).
 
         if metric in ["sales", "锁单量", "锁单数"] and "lock_time" in df.columns:
             df = df[df["lock_time"].notna()]

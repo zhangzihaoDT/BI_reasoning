@@ -46,7 +46,7 @@ dimensions:
     filter_field: series_group
 
   - name: product_type
-    aliases: [动力类型, 能源类型, type]
+    aliases: [动力类型, 能源类型, type, product_type_logic]
     values: [增程, 纯电]
     filter_field: product_type
 
@@ -89,6 +89,42 @@ rules:
     parameters:
       metric: 'extracted from query'
       date_range: 'extracted from query (default: yesterday)'
+
+  - rule: 'Launch Period Query'
+    condition: "User asks for 'launch' or 'post-launch' relative dates (e.g., 'LS9 launch + 7 days')."
+    tool: query
+    parameters:
+      metric: 'extracted from query'
+      date_range: 'extracted relative range (e.g., launch_plus_7d)'
+      filters:
+        - field: series
+          op: '='
+          value: 'extracted series (critical for launch date)'
+
+  - rule: 'Time-Series Composition'
+    condition: "User asks for 'percentage', 'composition', 'share' or 'ratio' of a dimension OVER TIME (e.g., 'daily share by product'). This rule applies even if 'launch' dates are used (pass filters)."
+    tool: composition
+    parameters:
+      metric: 'extracted from query (e.g., sales)'
+      dimension: 'extracted dimension (e.g., product_name)'
+      date_range: 'extracted from query (e.g. launch_plus_7d)'
+      interval: 'extracted interval (e.g., day, week, month)'
+      filters:
+        - field: 'extracted filter field'
+          op: '='
+          value: 'extracted filter value'
+
+  - rule: 'Static Composition'
+    condition: "User asks for 'percentage', 'composition', 'share' or 'ratio' of a dimension WITHOUT time trend."
+    tool: composition
+    parameters:
+      metric: 'extracted from query'
+      dimension: 'extracted dimension'
+      date_range: 'extracted from query'
+      filters:
+        - field: 'extracted filter field'
+          op: '='
+          value: 'extracted filter value'
 
   - rule: 'Series vs Series Group'
     condition: 'User mentions car series like LS6, L6, LS7, LS9.'

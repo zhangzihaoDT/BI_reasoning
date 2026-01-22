@@ -150,6 +150,8 @@ class CompositionTool(BaseTool):
         metric = params.get("metric")
         dimension = params.get("dimension")
         date_range = params.get("date_range")
+        interval = params.get("interval")  # New: Support interval
+        filters = params.get("filters") # New: Support filters
 
         dm = DataManager()
         
@@ -160,32 +162,69 @@ class CompositionTool(BaseTool):
         elif metric in ['开票量', '开票数']:
             time_col = 'invoice_upload_time'
             
-        df = dm.filter_data(date_range, time_col=time_col)
+        # Strategy: Apply filters first (for series/launch date context), then date filter
+        df = dm.get_data()
+        
+        # Apply filters
+        df = dm.apply_filters(df, filters)
+        
+        # Apply date range (using pre-filtered DF to support launch_plus logic)
+        df = dm.filter_data_on_df(df, date_range, time_col=time_col)
         
         if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
             df = df[df['lock_time'].notna()]
         elif metric in ['开票量', '开票数'] and 'invoice_upload_time' in df.columns and 'lock_time' in df.columns:
             df = df[df['invoice_upload_time'].notna() & df['lock_time'].notna()]
             
-        total = len(df)
+        rows = []
         
-        items = []
-        if dimension and dimension in df.columns:
-            grouped = df.groupby(dimension).size().sort_values(ascending=False)
-            items = [
-                {
-                    "dimension": str(k), 
-                    "value": int(v),
-                    "percent": float(v / total) if total > 0 else 0.0
-                }
-                for k, v in grouped.items()
-            ]
+        if not df.empty and dimension and dimension in df.columns:
+            if interval:
+                # Time-series composition
+                rule = 'D'
+                if interval == 'week': rule = 'W'
+                elif interval == 'month': rule = 'ME'
+                elif interval == 'year': rule = 'YE'
+                
+                # Group by Time and Dimension
+                # We need to set index to time_col for Grouper to work
+                df_indexed = df.set_index(time_col)
+                grouped = df_indexed.groupby([pd.Grouper(freq=rule), dimension]).size()
+                
+                # Calculate totals per time bucket for percentage
+                totals = df_indexed.groupby(pd.Grouper(freq=rule)).size()
+                
+                for (time_val, dim_val), count in grouped.items():
+                    total_in_bucket = totals.get(time_val, 0)
+                    rows.append({
+                        "date": str(time_val.date()),
+                        dimension: str(dim_val),
+                        "value": int(count),
+                        "percent": float(count / total_in_bucket) if total_in_bucket > 0 else 0.0
+                    })
+            else:
+                # Static composition (existing logic)
+                total = len(df)
+                grouped = df.groupby(dimension).size().sort_values(ascending=False)
+                rows = [
+                    {
+                        dimension: str(k), 
+                        "value": int(v),
+                        "percent": float(v / total) if total > 0 else 0.0
+                    }
+                    for k, v in grouped.items()
+                ]
+        elif not df.empty and not dimension:
+             # Fallback if no dimension provided (just total)
+             total = len(df)
+             rows = [{"value": total, "percent": 1.0}]
 
         return {
             "metric": metric,
             "dimension": dimension,
             "date_range": date_range,
-            "items": items,
+            "interval": interval,
+            "rows": rows, # Standardized output key
             "signals": [],
         }
 

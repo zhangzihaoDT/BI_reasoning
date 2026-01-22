@@ -6,6 +6,7 @@ import datetime
 import re
 from tools.query import QueryTool
 from tools.rollup import RollupTool
+from tools.decompose import CompositionTool
 
 class QueryAgent:
     def __init__(self, base_dir=None):
@@ -102,12 +103,12 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 
 **Output JSON Format (always):**
 {{
-  "tool": "query_or_rollup",
+  "tool": "query_or_rollup_or_composition",
   "parameters": {{
     "metric": "metric_name",
     "date_range": "date_range_string",
     "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
-    "dimension": "dimension_for_rollup_optional",
+    "dimension": "dimension_for_rollup_or_composition",
     "dimensions": ["dimension1","dimension2"],
     "interval": "day/week/month/year"
   }}
@@ -130,12 +131,12 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 
 **Output JSON Format (always):**
 {{
-  "tool": "query_or_rollup",
+  "tool": "query_or_rollup_or_composition",
   "parameters": {{
     "metric": "metric_name",
     "date_range": "date_range_string",
     "filters": [{{"field":"series_group","op":"=","value":"LS9"}}],
-    "dimension": "dimension_for_rollup_optional",
+    "dimension": "dimension_for_rollup_or_composition",
     "dimensions": ["dimension1","dimension2"],
     "interval": "day/week/month/year"
   }}
@@ -143,8 +144,9 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
 
 **Rules:**
 - Choose tool:
-  - Use "query" when user asks for a single number.
-  - Use "rollup" when user asks for breakdown (contains "按/分/各/分别" or lists multiple values like "LS6,LS9").
+  - Use "query" when user asks for a single number or simple time series trend.
+  - Use "rollup" when user asks for breakdown/grouping by a dimension (e.g. "by city", "each model").
+  - Use "composition" when user asks for percentage/ratio/share of a dimension (e.g. "product mix", "percentage by type").
 - metric must be one of: 锁单量/交付数/开票量/开票金额/小订数/年龄 (or sales/age).
 - date_range:
   - "昨日/昨天" -> "yesterday"
@@ -227,7 +229,13 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
 
         step = {"id": "query_action", "tool": tool_name, "parameters": parameters}
 
-        tool = RollupTool() if tool_name == "rollup" else QueryTool()
+        if tool_name == "composition":
+            tool = CompositionTool()
+        elif tool_name == "rollup":
+            tool = RollupTool()
+        else:
+            tool = QueryTool()
+            
         try:
             return tool.execute(step, {})
         except Exception as e:
@@ -325,9 +333,22 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
                 filters.append({"field": "lock_time", "op": "not_null", "value": True})
 
         tool = "rollup" if dimension else "query"
+        # Heuristic override for composition
+        if any(k in q for k in ["占比", "比例", "份额", "构成", "composition", "share", "ratio", "mix"]):
+            tool = "composition"
+
         parameters = {"metric": metric, "date_range": date_range}
         if filters:
             parameters["filters"] = filters
         if tool == "rollup":
             parameters["dimension"] = dimension
+        if tool == "composition":
+            parameters["dimension"] = dimension
+            # Try to find interval
+            if any(k in q for k in ["每天", "daily", "by day", "day"]):
+                parameters["interval"] = "day"
+            elif any(k in q for k in ["每周", "weekly", "by week", "week"]):
+                parameters["interval"] = "week"
+            elif any(k in q for k in ["每月", "monthly", "by month", "month"]):
+                parameters["interval"] = "month"
         return {"tool": tool, "parameters": parameters}

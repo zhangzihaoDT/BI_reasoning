@@ -1,7 +1,7 @@
 from typing import TypedDict, Literal, List, Dict, Any, Optional
 
 
-AnomalyFlag = Literal["结构性异常", "高波动异常", "正常波动"]
+AnomalyFlag = Literal["结构性异常", "比例假异常", "高波动异常", "正常波动"]
 
 
 class AnomalyDecision(TypedDict):
@@ -54,6 +54,42 @@ def classify_anomaly_from_stats(
     }
 
 
+def classify_ratio_decomposition(
+    delta_group: float,
+    delta_total: float,
+    delta_ratio: float,
+    ratio_threshold: float = 0.2,
+    scale_threshold: float = 0.2,
+) -> Optional[AnomalyDecision]:
+    """
+    用于判断：比例异常是否为结构异常，还是分母效应
+    输入为 log-diff 或 pct change
+    """
+
+    if abs(delta_ratio) < ratio_threshold:
+        return None  # 比例本身不显著，不触发
+
+    # 分组本身变化显著，且不是整体一起变
+    if abs(delta_group) >= scale_threshold and abs(delta_group - delta_total) >= scale_threshold:
+        return {
+            "flag": "结构性异常",
+            "z": delta_ratio,
+            "cv": abs(delta_group),
+            "anomaly_detected": True,
+        }
+
+    # 比例异常主要由整体变化驱动
+    if abs(delta_total) >= scale_threshold and abs(delta_group) < scale_threshold:
+        return {
+            "flag": "比例假异常",
+            "z": delta_ratio,
+            "cv": abs(delta_total),
+            "anomaly_detected": False,
+        }
+
+    return None
+
+
 def build_additive_ratio_drilldown_plan(
     decision: AnomalyDecision,
     metric: str,
@@ -61,6 +97,19 @@ def build_additive_ratio_drilldown_plan(
     dimensions: List[str],
     core_metrics: List[str],
 ) -> List[BiReasoningPlanStep]:
+    if decision["flag"] == "比例假异常":
+        return [
+            {
+                "id": "total_volume_check",
+                "tool": "trend",
+                "parameters": {
+                    "metric": "total_volume",
+                    "date_range": date_range,
+                },
+                "reasoning": "比例异常疑似由整体规模变化导致，优先确认分母变化。",
+            }
+        ]
+
     if not decision["anomaly_detected"]:
         return []
 
@@ -142,6 +191,15 @@ def evaluate_breadth_scan_and_plan(
         cv_threshold=cv_threshold,
     )
 
+    if anomaly_node.get("metric_type") == "ratio":
+        ratio_decision = classify_ratio_decomposition(
+            delta_group=float(anomaly_node.get("delta_group", 0.0)),
+            delta_total=float(anomaly_node.get("delta_total", 0.0)),
+            delta_ratio=float(anomaly_node.get("delta_ratio", 0.0)),
+        )
+        if ratio_decision:
+            decision = ratio_decision
+
     next_steps = build_additive_ratio_drilldown_plan(
         decision=decision,
         metric=metric,
@@ -154,4 +212,3 @@ def evaluate_breadth_scan_and_plan(
         "decision": decision,
         "next_steps": next_steps,
     }
-

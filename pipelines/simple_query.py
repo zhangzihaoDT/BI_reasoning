@@ -26,9 +26,69 @@ def display_result(result):
         if rows:
             try:
                 df = pd.DataFrame(rows)
+                
+                # Check if it's a matrix (2+ dimensions + value)
+                # dims might be a list or single string. Normalize to list.
+                dim_list = []
+                if isinstance(dims, list):
+                    dim_list = dims
+                elif isinstance(dims, str):
+                    dim_list = [dims]
+                # Also check columns if dims not reliable
+                # Exclude value and percent from dimension candidates
+                non_value_cols = [c for c in df.columns if c not in ["value", "percent"]]
+                
+                # Heuristic: If we have exactly 2 dimensions (e.g. Day + Product), use Pivot Table
+                matrix_success = False
+                if len(non_value_cols) == 2:
+                    row_dim = non_value_cols[0] # e.g. Day
+                    col_dim = non_value_cols[1] # e.g. Product
+                    
+                    # Pivot
+                    try:
+                        # Prioritize 'percent' if available (Composition Tool), else 'value'
+                        val_col = "value"
+                        if "percent" in df.columns:
+                            val_col = "percent"
+                            
+                        pivot_df = df.pivot(index=row_dim, columns=col_dim, values=val_col)
+                        # Fill NaNs with 0 (or empty) for display? 0 is safer for counts.
+                        pivot_df = pivot_df.fillna(0)
+                        
+                        # If showing percentage, format it
+                        if val_col == "percent":
+                            pivot_df = pivot_df.map(lambda x: f"{x:.1%}" if isinstance(x, (int, float)) else x)
+                        
+                        print("\n[Matrix View]")
+                        try:
+                            print(pivot_df.to_markdown())
+                        except ImportError:
+                            print(pivot_df.to_string())
+                        except Exception:
+                            print(pivot_df.to_string())
+                        
+                        print("") # Space
+                        matrix_success = True
+                    except Exception as e:
+                        # Fallback to list view if pivot fails (e.g. duplicates)
+                        print(f"Matrix view failed: {e}")
+                        pass
+
+                # Standard List View (fallback or additional)
                 # Reorder columns: dimensions first, then value
                 cols = [c for c in df.columns if c != "value"] + ["value"]
-                print(df[cols].to_markdown(index=False))
+                
+                # Show list if matrix failed OR if it wasn't attempted (not 2 dims)
+                # Also optionally show list if matrix succeeded but rows are few? 
+                # For now, ensure we show SOMETHING.
+                if not matrix_success:
+                     try:
+                         print(df[cols].to_markdown(index=False))
+                     except ImportError:
+                         print(df[cols].to_string(index=False))
+                     except Exception:
+                         print(df[cols].to_string(index=False))
+                     
             except ImportError:
                 # Fallback if tabulate/markdown not available (though pandas usually handles string output)
                 print(df[cols].to_string(index=False))

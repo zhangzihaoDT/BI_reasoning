@@ -5,6 +5,7 @@ from pathlib import Path
 import glob
 import numpy as np
 import re
+import json
 
 class DataManager:
     _instance = None
@@ -16,7 +17,18 @@ class DataManager:
             cls._instance.data_path = "/Users/zihao_/Documents/coding/dataset/formatted/order_full_data.parquet"
             cls._instance.assign_data = None
             cls._instance.assign_path = None
+            cls._instance.business_definition = None
         return cls._instance
+
+    def load_business_definition(self):
+        if self.business_definition is None:
+            path = Path("/Users/zihao_/Documents/github/W52_reasoning/world/business_definition.json")
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
+                    self.business_definition = json.load(f)
+            else:
+                self.business_definition = {}
+        return self.business_definition
 
     @staticmethod
     def _parse_cn_date_static(val):
@@ -150,8 +162,61 @@ class DataManager:
             self.load_assign_data()
         return self.assign_data
 
+    def apply_filters(self, df: pd.DataFrame, filters: list) -> pd.DataFrame:
+        """
+        Apply a list of filters to the DataFrame.
+        Each filter is a dict with: field, op, value.
+        """
+        if df.empty or not filters:
+            return df
+
+        if isinstance(filters, dict):
+            filters = [{"field": k, "op": "=", "value": v} for k, v in filters.items()]
+
+        if not isinstance(filters, list):
+            return df
+
+        for f in filters:
+            if not isinstance(f, dict):
+                continue
+            field = f.get("field")
+            op = (f.get("op") or "=").lower()
+            value = f.get("value")
+            
+            if not field or field not in df.columns:
+                continue
+
+            if op in ["=", "=="]:
+                df = df[df[field] == value]
+            elif op in ["!=", "<>"]:
+                df = df[df[field] != value]
+            elif op == "in":
+                values = value if isinstance(value, list) else [value]
+                df = df[df[field].isin(values)]
+            elif op == "contains":
+                df = df[df[field].astype(str).str.contains(str(value), na=False)]
+            elif op in ["not_null", "notna", "exists", "is not null", "not null", "is_not_null"]:
+                df = df[df[field].notna()]
+            elif op in [">", ">=", "<", "<="]:
+                s = pd.to_numeric(df[field], errors="coerce")
+                v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+                if pd.isna(v):
+                    continue
+                if op == ">":
+                    df = df[s > v]
+                elif op == ">=":
+                    df = df[s >= v]
+                elif op == "<":
+                    df = df[s < v]
+                elif op == "<=":
+                    df = df[s <= v]
+        return df
+
     def filter_data(self, date_range: Optional[str] = None, time_col: str = 'order_create_date') -> pd.DataFrame:
         df = self.get_data()
+        return self.filter_data_on_df(df, date_range, time_col)
+
+    def filter_data_on_df(self, df: pd.DataFrame, date_range: Optional[str] = None, time_col: str = 'order_create_date') -> pd.DataFrame:
         if not date_range:
             return df
             
@@ -162,10 +227,6 @@ class DataManager:
         # Use current system time as today
         today = pd.Timestamp.now().normalize()
         # Use dataset max date based on the specific time column
-        # If time_col is lock_time, we should look at max lock_time? 
-        # Or should we still anchor 'today' relative to system time?
-        # The prompt implies system time.
-        # But max_data_date validation should be against the time_col.
         max_data_date = df[time_col].max()
         
         if date_range == "yesterday":
@@ -212,6 +273,43 @@ class DataManager:
                     return df[df[time_col].dt.strftime('%Y-%m-%d') == date_range]
             except Exception:
                 pass
+
+        # Handle "launch_plus_Nd" relative format
+        if date_range.startswith("launch_plus_"):
+            try:
+                days_match = re.search(r'(\d+)d', date_range)
+                days = int(days_match.group(1)) if days_match else 7
+                
+                # Determine series from dataframe context or assume it's pre-filtered externally
+                # But here we need to know WHICH series to look up. 
+                # Strategy: Check if data is filtered by series, or check filters passed? 
+                # Since filter_data doesn't get filters, we infer from data distribution or need a way to know.
+                # Simplified approach: Look at 'series' column if unique.
+                
+                target_series = None
+                if 'series' in df.columns:
+                    unique_series = df['series'].dropna().unique()
+                    if len(unique_series) == 1:
+                        target_series = unique_series[0]
+                    elif 'series_group' in df.columns:
+                        unique_groups = df['series_group'].dropna().unique()
+                        if len(unique_groups) == 1:
+                            target_series = unique_groups[0]
+                
+                if target_series:
+                    biz_def = self.load_business_definition()
+                    launch_info = biz_def.get("time_periods", {}).get(target_series)
+                    # Correctly use 'end' as Launch Date based on schema.md
+                    if launch_info and "end" in launch_info:
+                        launch_date = pd.to_datetime(launch_info["end"])
+                        end_date = launch_date + pd.Timedelta(days=days - 1) # inclusive
+                        return df[(df[time_col] >= launch_date) & (df[time_col] <= end_date)]
+                    else:
+                        print(f"Warning: No launch info (end date) found for series {target_series}")
+                else:
+                    print("Warning: Ambiguous series for launch date calculation. Ensure data is filtered by a single series.")
+            except Exception as e:
+                print(f"Error parsing launch date: {e}")
                 
         return df
     
