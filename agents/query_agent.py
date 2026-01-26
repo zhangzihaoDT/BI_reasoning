@@ -147,7 +147,7 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
   - Use "query" when user asks for a single number or simple time series trend.
   - Use "rollup" when user asks for breakdown/grouping by a dimension (e.g. "by city", "each model").
   - Use "composition" when user asks for percentage/ratio/share of a dimension (e.g. "product mix", "percentage by type").
-- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数/年龄 (or sales/age).
+- metric must be one of: 锁单量/交付数/开票量/开票金额/小订数/年龄/下发线索数 (or sales/age/leads).
 - date_range:
   - "昨日/昨天" -> "yesterday"
   - "last 7 days" -> "last_7_days"
@@ -258,12 +258,22 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
             metric = "小订数"
         elif any(k in q for k in ["平均年龄", "年龄", "岁"]):
             metric = "age"
+        elif any(k in q for k in ["下发线索数", "线索数", "线索", "leads"]):
+            metric = "下发线索数"
         else:
             metric = "锁单量"
 
         date_range = "yesterday"
         if "昨日" in q or "昨天" in q:
             date_range = "yesterday"
+        elif "至今" in q or "since" in q:
+            # Handle "YYYY年MM月DD日至今"
+            m_day = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", q_no_space)
+            if m_day:
+                y, mo, d = m_day.groups()
+                start_date = f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+                today_str = datetime.date.today().strftime("%Y-%m-%d")
+                date_range = f"{start_date}/{today_str}"
         else:
             m_day = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", q_no_space)
             if m_day:

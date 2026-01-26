@@ -14,7 +14,7 @@ class PlanningAgent:
         self.schema_path = os.path.join(self.base_dir, "world", "schema.md")
         self.business_def_path = os.path.join(self.base_dir, "world", "business_definition.json")
         self.tool_path = os.path.join(self.base_dir, "world", "tool.md")
-        self.planning_rules_path = os.path.join(self.base_dir, "agents", "planning_rules.yaml")
+        self.planning_rules_path = os.path.join(self.base_dir, "agents", "planning_skills.yaml")
         self.env_path = os.path.join(self.base_dir, ".env")
         
         self.api_key = self._load_api_key()
@@ -83,6 +83,7 @@ Your goal is to translate a user's natural language business query into a struct
      - `{{default_structure_dimension}}`: Infer from query (e.g., "按城市" -> "Store City") OR use `defaults` from yaml (e.g., "车型分组").
    - **Reasoning:** Update the reasoning to be specific to the current query.
    - **Output Key:** Ensure every step has a unique and meaningful `output_key`.
+   - **Limit:** Keep the total number of steps under 10 to ensure the output is not truncated. Prioritize the most critical analysis steps.
 
 **Output Format (JSON):**
 Return a JSON array of objects. Each object represents an action step and must have the following fields:
@@ -114,7 +115,7 @@ Then output should follow the `breadth_scan` sequence (Baseline -> Short-term Tr
                 {"role": "user", "content": query}
             ],
             "temperature": 0.1,
-            "max_tokens": 1000
+            "max_tokens": 2000
         }
         
         try:

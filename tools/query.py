@@ -43,6 +43,46 @@ class QueryTool(BaseTool):
         dm = DataManager()
 
         metric = str(metric) if metric is not None else None
+        
+        # Check if metric belongs to Assign Data
+        assign_metrics = [
+            "下发线索数", "下发线索当日试驾数", "下发线索 7 日试驾数", "下发线索 7 日锁单数",
+            "下发线索 30日试驾数", "下发线索 30 日锁单数", "下发门店数",
+            "下发线索当日锁单数 (门店)", "下发线索数 (门店)"
+        ]
+        
+        if metric in assign_metrics:
+            print(f"[QueryTool] Using Assign Data for metric: {metric}")
+            # Note: Assign Data is global (no series breakdown), so series filters are ignored.
+            # We allow the query to proceed to return global values (best effort).
+            
+            df = dm.get_assign_data()
+            df = dm.filter_assign_data(date_range)
+            
+            if df.empty:
+                return {"value": 0, "metric": metric, "filters": filters, "sample_size": 0}
+                
+            # Compute value
+            if params.get("interval"):
+                # Time series
+                interval = params.get("interval")
+                # Group by interval
+                if interval == "day":
+                    # df has 'assign_date'
+                    if 'assign_date' in df.columns:
+                        grouped = df.groupby(df['assign_date'].dt.strftime('%Y-%m-%d'))[metric].sum()
+                        return {"value": grouped.to_dict(), "metric": metric, "interval": interval, "filters": filters}
+                elif interval == "month":
+                    if 'assign_date' in df.columns:
+                        grouped = df.groupby(df['assign_date'].dt.strftime('%Y-%m'))[metric].sum()
+                        return {"value": grouped.to_dict(), "metric": metric, "interval": interval, "filters": filters}
+                # Default/Fallback
+                return {"value": df[metric].sum(), "metric": metric, "filters": filters}
+            else:
+                # Scalar
+                val = df[metric].sum()
+                return {"value": val, "metric": metric, "filters": filters, "sample_size": len(df)}
+
         time_col = "order_create_date"
         if metric in ["sales", "锁单量", "锁单数"]:
             time_col = "lock_time"

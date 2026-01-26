@@ -12,12 +12,17 @@ class DistributionTool(BaseTool):
     name = "distribution"
 
     def can_handle(self, step: dict) -> bool:
-        return step.get("tool") == "distribution" or step.get("tool") == "histogram"
+        return step.get("tool") in ["distribution", "histogram", "boxplot"]
 
     def execute(self, step: dict, state: dict):
+        tool_name = step.get("tool")
         params = step.get("parameters", {})
         metric = params.get("metric")
         dimension = params.get("dimension")  # New: Categorical dimension
+        group_by = params.get("group_by") # For boxplot
+        if not dimension and group_by:
+             dimension = group_by # normalize
+
         bins_param = params.get("bins", 30)
         date_range = params.get("date_range")
         compare_date_range = params.get("compare_date_range")
@@ -119,6 +124,56 @@ class DistributionTool(BaseTool):
                 "message": f"Insufficient data to calculate distribution for {metric} in {date_range}. (Sample size: 0)"
             })
              return result
+
+        # --- Boxplot Logic ---
+        if tool_name == "boxplot":
+            if not dimension:
+                # If no dimension, just one box
+                dimension = "all"
+                df_primary["all"] = "All"
+            
+            if dimension not in df_primary.columns:
+                 result["signals"].append({
+                    "type": "error",
+                    "status": "failed",
+                    "message": f"Dimension {dimension} not found in data."
+                })
+                 return result
+
+            # We need the numeric metric column. 
+            # get_metric_series extracts it, but we need it aligned with the dataframe to group by dimension.
+            # So we add it as a column.
+            metric_series = get_metric_series(df_primary, metric)
+            if metric_series.empty:
+                 result["signals"].append({
+                    "type": "error",
+                    "status": "failed",
+                    "message": f"Could not calculate metric {metric}."
+                })
+                 return result
+            
+            # Align indices
+            df_primary = df_primary.loc[metric_series.index]
+            df_primary["_metric_value"] = metric_series
+            
+            # Group by dimension and calc stats
+            stats = df_primary.groupby(dimension)["_metric_value"].describe(percentiles=[0.25, 0.5, 0.75])
+            
+            boxplot_data = []
+            for name, row in stats.iterrows():
+                boxplot_data.append({
+                    "group": str(name),
+                    "min": row["min"],
+                    "q1": row["25%"],
+                    "median": row["50%"],
+                    "q3": row["75%"],
+                    "max": row["max"],
+                    "count": row["count"],
+                    "mean": row["mean"]
+                })
+            
+            result["boxplot"] = boxplot_data
+            return result
 
         # --- Categorical Distribution (if dimension is provided) ---
         if dimension:

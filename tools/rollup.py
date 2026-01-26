@@ -11,9 +11,10 @@ class RollupTool(BaseTool):
     name = "rollup"
 
     def can_handle(self, step: dict) -> bool:
-        return step.get("tool") == "rollup"
+        return step.get("tool") == "rollup" or step.get("tool") == "top_n"
 
     def execute(self, step: dict, state: dict):
+        tool_name = step.get("tool")
         params = step.get("parameters", {})
         metric = params.get("metric")
         dimension = params.get("dimension")
@@ -21,6 +22,10 @@ class RollupTool(BaseTool):
         date_range = params.get("date_range")
         filters = params.get("filters")
         interval = params.get("interval") # Add interval support
+        
+        # Top N specific params
+        n_limit = params.get("n", 5)
+        order = params.get("order", "desc")
 
         # Load business definition for age limits
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,14 +73,20 @@ class RollupTool(BaseTool):
             for f in _filters:
                 if not isinstance(f, dict):
                     continue
-                field = f.get("field")
-                op = (f.get("op") or "=").lower()
-                value = f.get("value")
+                field = f.get("field") or f.get("dimension")
+                op = (f.get("op") or f.get("operator") or "=").lower()
+                value = f.get("value") or f.get("values")
                 if not field or field not in _df.columns:
                     continue
 
                 if op in ["=", "=="]:
-                    _df = _df[_df[field] == value]
+                    if isinstance(value, list):
+                        if len(value) == 1:
+                            _df = _df[_df[field] == value[0]]
+                        else:
+                            _df = _df[_df[field].isin(value)]
+                    else:
+                        _df = _df[_df[field] == value]
                 elif op in ["!=", "<>"]:
                     _df = _df[_df[field] != value]
                 elif op == "in":
@@ -312,7 +323,13 @@ class RollupTool(BaseTool):
                 if time_dim in valid_group_fields:
                      grouped = grouped.sort_index()
                 else:
-                     grouped = grouped.sort_values(ascending=False)
+                     if tool_name == "top_n":
+                         ascending = (order == "asc")
+                         grouped = grouped.sort_values(ascending=ascending)
+                         if n_limit:
+                             grouped = grouped.head(n_limit)
+                     else:
+                         grouped = grouped.sort_values(ascending=False)
                 
                 rows = []
                 for idx, v in grouped.items():
@@ -331,7 +348,13 @@ class RollupTool(BaseTool):
                 if time_dim in valid_group_fields:
                      grouped = grouped.sort_index()
                 else:
-                     grouped = grouped.sort_values(ascending=False)
+                     if tool_name == "top_n":
+                         ascending = (order == "asc")
+                         grouped = grouped.sort_values(ascending=ascending)
+                         if n_limit:
+                             grouped = grouped.head(n_limit)
+                     else:
+                         grouped = grouped.sort_values(ascending=False)
 
                 rows = []
                 for idx, v in grouped.items():
@@ -349,7 +372,13 @@ class RollupTool(BaseTool):
                 if time_dim in valid_group_fields:
                      grouped = grouped.sort_index()
                 else:
-                     grouped = grouped.sort_values(ascending=False)
+                     if tool_name == "top_n":
+                         ascending = (order == "asc")
+                         grouped = grouped.sort_values(ascending=ascending)
+                         if n_limit:
+                             grouped = grouped.head(n_limit)
+                     else:
+                         grouped = grouped.sort_values(ascending=False)
 
                 rows = []
                 for idx, v in grouped.items():

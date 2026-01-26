@@ -123,12 +123,58 @@ class RatioTool(BaseTool):
 
         # Handle numerator/denominator if provided
         if "numerator" in params and "denominator" in params:
-             # Placeholder for custom ratio
+             num_metric = params["numerator"]
+             den_metric = params["denominator"]
+             filters = params.get("filters", [])
+             
+             # Helper to get value for a metric
+             def get_metric_value(metric_name, filters):
+                 # Check assign metrics
+                 assign_metrics = [
+                    "下发线索数", "下发线索当日试驾数", "下发线索 7 日试驾数", "下发线索 7 日锁单数",
+                    "下发线索 30日试驾数", "下发线索 30 日锁单数", "下发门店数",
+                    "下发线索当日锁单数 (门店)", "下发线索数 (门店)"
+                 ]
+                 if metric_name in assign_metrics:
+                     adf = dm.get_assign_data()
+                     adf = dm.filter_assign_data(date_range)
+                     # Apply filters if possible (assign data usually doesn't have series/product)
+                     # But we try anyway using dm.apply_filters
+                     adf = dm.apply_filters(adf, filters)
+                     return int(adf[metric_name].sum()) if not adf.empty and metric_name in adf.columns else 0
+                 
+                 # Order metrics
+                 odf = dm.get_data()
+                 time_col = "order_create_date"
+                 if metric_name in ["sales", "锁单量", "锁单数"]:
+                     time_col = "lock_time"
+                 elif metric_name in ["交付数", "交付量"]:
+                     time_col = "delivery_date"
+                 elif metric_name in ["开票量", "开票数", "开票金额", "invoice_amount"]:
+                     time_col = "invoice_upload_time"
+                 
+                 odf = dm.filter_data_on_df(odf, date_range, time_col)
+                 odf = dm.apply_filters(odf, filters)
+                 
+                 if metric_name in ["sales", "锁单量", "锁单数"]:
+                     return int(odf['lock_time'].notna().sum())
+                 elif metric_name in ["交付数", "交付量"]:
+                     return int(odf['delivery_date'].notna().sum())
+                 else:
+                     return len(odf) # Default count
+
+             num_val = get_metric_value(num_metric, filters)
+             den_val = get_metric_value(den_metric, filters)
+             
+             ratio = float(num_val / den_val) if den_val > 0 else 0.0
+             
              return {
                 "date_range": date_range,
-                "ratio": 0.0, 
-                "numerator": params["numerator"],
-                "denominator": params["denominator"],
+                "ratio": ratio, 
+                "numerator": num_metric,
+                "denominator": den_metric,
+                "numerator_value": num_val,
+                "denominator_value": den_val,
                 "signals": [],
             }
 
@@ -322,6 +368,9 @@ class DualAxisTool(BaseTool):
             
         df = dm.filter_data(date_range, time_col=time_col)
         
+        filters_left = params.get("filters_left") or params.get("filters")
+        filters_right = params.get("filters_right")
+
         # Note: DualAxis might use different metrics for left/right
         # If left_metric is sales, apply filter for left series calculation
         
@@ -334,38 +383,52 @@ class DualAxisTool(BaseTool):
             elif time_grain == 'month':
                 rule = 'ME'
 
-            resampled_all = base_df.set_index(time_col).resample(rule)
-                        
-            # Left metric logic
-            if left_metric in ['sales', '锁单量']:
-                 df_left = base_df[base_df['lock_time'].notna()].set_index(time_col)
-                 left_series = df_left.resample(rule).size()
-            else:
-                 left_series = resampled_all.size()
+            # --- Left Series Calculation ---
+            # Apply left filters
+            df_left_filtered = dm.apply_filters(base_df, filters_left)
             
-            # Right metric = lock count (example) or something else
-            # If right metric is different, we might need to re-fetch or re-index?
-            # For now, assuming right metric can be calculated from the SAME dataset and SAME time axis.
-            # If right metric is "traffic", and we index by "lock_time", it might be weird.
-            # But usually Dual Axis compares correlated metrics on SAME time axis.
+            if left_metric in ['sales', '锁单量']:
+                 # Ensure lock_time exists for sales
+                 if 'lock_time' in df_left_filtered.columns:
+                     df_left_filtered = df_left_filtered[df_left_filtered['lock_time'].notna()]
+            
+            # Resample left
+            if not df_left_filtered.empty:
+                left_series = df_left_filtered.set_index(time_col).resample(rule).size()
+            else:
+                left_series = pd.Series(dtype=int)
+
+            # --- Right Series Calculation ---
+            # Apply right filters
+            df_right_filtered = dm.apply_filters(base_df, filters_right)
             
             if right_metric in ['sales', '锁单量']:
-                df_right = base_df[base_df['lock_time'].notna()].set_index(time_col)
-                right_series = df_right.resample(rule).size()
+                if 'lock_time' in df_right_filtered.columns:
+                    df_right_filtered = df_right_filtered[df_right_filtered['lock_time'].notna()]
             elif right_metric in ['开票量', '开票数']:
-                df_right = base_df[base_df['invoice_upload_time'].notna() & base_df['lock_time'].notna()].set_index(time_col)
-                right_series = df_right.resample(rule).size()
-            else:
-                right_series = resampled_all.size()
+                if 'invoice_upload_time' in df_right_filtered.columns and 'lock_time' in df_right_filtered.columns:
+                    df_right_filtered = df_right_filtered[
+                        df_right_filtered['invoice_upload_time'].notna() & 
+                        df_right_filtered['lock_time'].notna()
+                    ]
             
-            # Align indexes (use left_series index as base)
-            for d in left_series.index:
-                # Handle potential missing index in right_series if dates don't align perfectly (though resample usually aligns them)
+            # Resample right
+            if not df_right_filtered.empty:
+                right_series = df_right_filtered.set_index(time_col).resample(rule).size()
+            else:
+                right_series = pd.Series(dtype=int)
+            
+            # --- Align and Merge ---
+            # Union of indexes to ensure we cover both ranges
+            all_dates = sorted(list(set(left_series.index) | set(right_series.index)))
+            
+            for d in all_dates:
+                l_val = left_series.get(d, 0)
                 r_val = right_series.get(d, 0)
                 
                 series.append({
                     "time": str(d.date()),
-                    "left_value": int(left_series[d]),
+                    "left_value": int(l_val),
                     "right_value": int(r_val)
                 })
 

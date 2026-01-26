@@ -85,6 +85,8 @@ class DataManager:
             choices = ['CM2', 'CM1', 'CM0', 'DM1', 'DM0', 'LS9', 'LS7', 'L7']
             
             self.data['series_group'] = np.select(conditions, choices, default='其他')
+            # Alias series_group to series for easier filtering
+            self.data['series'] = self.data['series_group']
             
             # Vectorized product_type logic
             # "52" or "66" in product name -> "增程" (as per original logic), else "纯电"
@@ -170,6 +172,10 @@ class DataManager:
         if df.empty or not filters:
             return df
 
+        if self.business_definition is None:
+            self.load_business_definition()
+        mapping = self.business_definition.get("model_series_mapping", {})
+
         if isinstance(filters, dict):
             filters = [{"field": k, "op": "=", "value": v} for k, v in filters.items()]
 
@@ -179,15 +185,42 @@ class DataManager:
         for f in filters:
             if not isinstance(f, dict):
                 continue
-            field = f.get("field")
-            op = (f.get("op") or "=").lower()
-            value = f.get("value")
+            field = f.get("field") or f.get("dimension")
+            op = (f.get("op") or f.get("operator") or "=").lower()
+            value = f.get("value") or f.get("values")
             
             if not field or field not in df.columns:
                 continue
 
+            # Auto-expand mapped values (e.g. LS6 -> [CM0, CM1, CM2])
+            if field in ['series_group', 'series'] and op in ['=', '==', 'in']:
+                # Handle single value
+                if isinstance(value, str) and value in mapping:
+                    op = 'in'
+                    value = mapping[value]
+                # Handle list of values (if any matches mapping)
+                elif isinstance(value, list):
+                    new_values = []
+                    expanded = False
+                    for v in value:
+                        if isinstance(v, str) and v in mapping:
+                            new_values.extend(mapping[v])
+                            expanded = True
+                        else:
+                            new_values.append(v)
+                    if expanded:
+                        value = new_values
+                        op = 'in'
+
             if op in ["=", "=="]:
-                df = df[df[field] == value]
+                if isinstance(value, list):
+                    if len(value) == 1:
+                        df = df[df[field] == value[0]]
+                    else:
+                        # Auto-switch to 'in' if multiple values provided with '='
+                        df = df[df[field].isin(value)]
+                else:
+                    df = df[df[field] == value]
             elif op in ["!=", "<>"]:
                 df = df[df[field] != value]
             elif op == "in":
@@ -249,9 +282,29 @@ class DataManager:
         
         # Try to parse specific date formats
         if date_range:
+            # Support "至今" suffix (Chinese for "to present")
+            if '至今' in str(date_range):
+                start_str = str(date_range).replace('至今', '').strip()
+                try:
+                    start = pd.to_datetime(start_str).normalize()
+                    return df[df[time_col] >= start]
+                except Exception:
+                    pass
+
             # Check for date range format: YYYY-MM-DD/YYYY-MM-DD
             if '/' in date_range:
                 parts = date_range.split('/')
+                if len(parts) == 2:
+                    try:
+                        start = pd.to_datetime(parts[0]).normalize()
+                        end = pd.to_datetime(parts[1]).normalize()
+                        return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+                    except Exception:
+                        pass
+
+            # Support " to " separator
+            if ' to ' in date_range:
+                parts = date_range.split(' to ')
                 if len(parts) == 2:
                     try:
                         start = pd.to_datetime(parts[0]).normalize()
@@ -334,9 +387,23 @@ class DataManager:
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
         try:
+            # Support "至今" suffix (Chinese for "to present")
+            if '至今' in str(date_range):
+                start_str = str(date_range).replace('至今', '').strip()
+                start = pd.to_datetime(start_str).normalize()
+                return df[df[time_col] >= start]
+
             # Check for date range format: YYYY-MM-DD/YYYY-MM-DD
             if '/' in str(date_range):
                 parts = str(date_range).split('/')
+                if len(parts) == 2:
+                    start = pd.to_datetime(parts[0]).normalize()
+                    end = pd.to_datetime(parts[1]).normalize()
+                    return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+            
+            # Support " to " separator
+            if ' to ' in str(date_range):
+                parts = str(date_range).split(' to ')
                 if len(parts) == 2:
                     start = pd.to_datetime(parts[0]).normalize()
                     end = pd.to_datetime(parts[1]).normalize()
@@ -346,9 +413,20 @@ class DataManager:
                 return df[df[time_col].dt.strftime('%Y-%m') == str(date_range)]
             if re.match(r'^\d{4}-\d{2}-\d{2}$', str(date_range)):
                 return df[df[time_col].dt.strftime('%Y-%m-%d') == str(date_range)]
-        except Exception:
+                
+            # Handle Chinese Date format
+            m_day = re.match(r"(\d{4})年(\d{1,2})月(\d{1,2})日", str(date_range))
+            if m_day:
+                y, mo, d = m_day.groups()
+                target_date = f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+                return df[df[time_col].dt.strftime('%Y-%m-%d') == target_date]
+
+        except Exception as e:
+            print(f"Date parsing failed: {e}")
             pass
-        return df
+            
+        print(f"Warning: date_range '{date_range}' provided but could not be parsed. Returning empty result to avoid returning full history.")
+        return pd.DataFrame()
     
     def compute_assign_rates(self, date_range: Optional[str] = None) -> dict:
         df = self.filter_assign_data(date_range) if date_range else self.get_assign_data()
