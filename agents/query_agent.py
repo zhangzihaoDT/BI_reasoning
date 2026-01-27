@@ -266,6 +266,23 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
         date_range = "yesterday"
         if "昨日" in q or "昨天" in q:
             date_range = "yesterday"
+        elif "近两周" in q:
+             date_range = "last_14_days"
+        elif "近一周" in q:
+             date_range = "last_7_days"
+        elif "近一月" in q or "近一个月" in q:
+             date_range = "last_30_days"
+        elif re.search(r"近(\d+)天", q):
+             m = re.search(r"近(\d+)天", q)
+             date_range = f"last_{m.group(1)}_days"
+        elif re.search(r"近(\d+)周", q):
+             m = re.search(r"近(\d+)周", q)
+             days = int(m.group(1)) * 7
+             date_range = f"last_{days}_days"
+        elif re.search(r"近(\d+)月", q):
+             m = re.search(r"近(\d+)月", q)
+             days = int(m.group(1)) * 30
+             date_range = f"last_{days}_days"
         elif "至今" in q or "since" in q:
             # Handle "YYYY年MM月DD日至今"
             m_day = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", q_no_space)
@@ -296,7 +313,7 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
             dimension = "first_middle_channel_name"
         elif re.search(r"(按|分|各).*(产品|产品名称)", q):
             dimension = "product_name"
-        elif re.search(r"(按|分|各).*(车型|车型分组)", q):
+        elif re.search(r"(按|分|各).*(车型|车型分组|版本)", q):
             dimension = "series_group"
         elif re.search(r"(按|分|各).*(性别)", q):
             dimension = "gender"

@@ -279,9 +279,35 @@ class DataManager:
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
+        elif str(date_range).startswith("last_") and str(date_range).endswith("_days"):
+            try:
+                days = int(str(date_range).split("_")[1])
+                start_date = today - pd.Timedelta(days=days)
+                return df[df[time_col] >= start_date]
+            except Exception:
+                pass
+        elif str(date_range).startswith("last_") and str(date_range).endswith("_weeks"):
+            try:
+                weeks = int(str(date_range).split("_")[1])
+                start_date = today - pd.Timedelta(weeks=weeks)
+                return df[df[time_col] >= start_date]
+            except Exception:
+                pass
         
         # Try to parse specific date formats
         if date_range:
+            # Support various separators including Chinese '至' and tilde
+            for sep in ['至', '～', '~']:
+                if sep in str(date_range):
+                    parts = str(date_range).split(sep)
+                    if len(parts) == 2:
+                        try:
+                            start = pd.to_datetime(parts[0].strip()).normalize()
+                            end = pd.to_datetime(parts[1].strip()).normalize()
+                            return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+                        except Exception:
+                            pass
+
             # Support "至今" suffix (Chinese for "to present")
             if '至今' in str(date_range):
                 start_str = str(date_range).replace('至今', '').strip()
@@ -386,7 +412,26 @@ class DataManager:
         elif date_range == "last_7_days":
             start_date = today - pd.Timedelta(days=7)
             return df[df[time_col] >= start_date]
+        elif str(date_range).startswith("last_") and str(date_range).endswith("_days"):
+            try:
+                days = int(str(date_range).split("_")[1])
+                start_date = today - pd.Timedelta(days=days)
+                return df[df[time_col] >= start_date]
+            except Exception:
+                pass
         try:
+            # Support various separators including Chinese '至' and tilde
+            for sep in ['至', '～', '~']:
+                if sep in str(date_range):
+                    parts = str(date_range).split(sep)
+                    if len(parts) == 2:
+                        try:
+                            start = pd.to_datetime(parts[0].strip()).normalize()
+                            end = pd.to_datetime(parts[1].strip()).normalize()
+                            return df[(df[time_col] >= start) & (df[time_col] < end + pd.Timedelta(days=1))]
+                        except Exception:
+                            pass
+
             # Support "至今" suffix (Chinese for "to present")
             if '至今' in str(date_range):
                 start_str = str(date_range).replace('至今', '').strip()

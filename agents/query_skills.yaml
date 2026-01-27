@@ -41,7 +41,7 @@ dimensions:
     filter_field: series
 
   - name: series_group
-    aliases: [车型, 车型分组, model]
+    aliases: [车型, 车型分组, model, 版本]
     values: [CM2, CM1, CM0, DM1, DM0, LS9, LS7, L7]
     filter_field: series_group
 
@@ -125,6 +125,12 @@ rules:
         - field: 'extracted filter field'
           op: '='
           value: 'extracted filter value'
+
+  - rule: 'Model Version Breakdown'
+    condition: "User asks for 'version' (版本) breakdown for a car model."
+    tool: rollup
+    parameters:
+      dimension: 'series_group' # Map "版本" to series_group (e.g. CM0, CM1) NOT product_name
 
   - rule: 'Series vs Series Group'
     condition: 'User mentions car series like LS6, L6, LS7, LS9.'

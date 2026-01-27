@@ -60,59 +60,8 @@ class RollupTool(BaseTool):
         df = dm.get_data()
 
         # 2. Apply explicit filters (e.g. series=LS9)
-        def _apply_filters(_df: pd.DataFrame, _filters):
-            if _df.empty or not _filters:
-                return _df
-
-            if isinstance(_filters, dict):
-                _filters = [{"field": k, "op": "=", "value": v} for k, v in _filters.items()]
-
-            if not isinstance(_filters, list):
-                return _df
-
-            for f in _filters:
-                if not isinstance(f, dict):
-                    continue
-                field = f.get("field") or f.get("dimension")
-                op = (f.get("op") or f.get("operator") or "=").lower()
-                value = f.get("value") or f.get("values")
-                if not field or field not in _df.columns:
-                    continue
-
-                if op in ["=", "=="]:
-                    if isinstance(value, list):
-                        if len(value) == 1:
-                            _df = _df[_df[field] == value[0]]
-                        else:
-                            _df = _df[_df[field].isin(value)]
-                    else:
-                        _df = _df[_df[field] == value]
-                elif op in ["!=", "<>"]:
-                    _df = _df[_df[field] != value]
-                elif op == "in":
-                    values = value if isinstance(value, list) else [value]
-                    _df = _df[_df[field].isin(values)]
-                elif op == "contains":
-                    _df = _df[_df[field].astype(str).str.contains(str(value), na=False)]
-                elif op in ["not_null", "notna", "exists", "is not null", "not null", "is_not_null"]:
-                    _df = _df[_df[field].notna()]
-                elif op in [">", ">=", "<", "<="]:
-                    s = pd.to_numeric(_df[field], errors="coerce")
-                    v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-                    if pd.isna(v):
-                        continue
-                    if op == ">":
-                        _df = _df[s > v]
-                    elif op == ">=":
-                        _df = _df[s >= v]
-                    elif op == "<":
-                        _df = _df[s < v]
-                    elif op == "<=":
-                        _df = _df[s <= v]
-            return _df
-
-        # Apply series/other filters FIRST
-        df = _apply_filters(df, filters)
+        # Use DataManager's apply_filters to handle model_series_mapping expansion
+        df = dm.apply_filters(df, filters)
 
         # 3. Now apply date filter (which might need series context)
         # Use filter_data_on_df instead of filter_data

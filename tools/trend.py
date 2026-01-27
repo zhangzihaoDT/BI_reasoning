@@ -324,7 +324,7 @@ class TrendTool(BaseTool):
         
         # Apply filters (NEW)
         if filters:
-            df = self._apply_filters(df, filters)
+            df = dm.apply_filters(df, filters)
 
         # Apply metric definition
         if metric in ['sales', '锁单量'] and 'lock_time' in df.columns:
