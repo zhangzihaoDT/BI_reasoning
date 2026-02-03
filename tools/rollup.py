@@ -253,6 +253,7 @@ class RollupTool(BaseTool):
 
             if metric in ["开票金额", "invoice_amount"] and "invoice_amount" in df.columns:
                 amount = pd.to_numeric(df["invoice_amount"], errors="coerce").fillna(0)
+                total_val = amount.sum()
                 grouped = amount.groupby([df[g] for g in valid_group_fields], observed=True).sum()
                 
                 # Apply zero-filling if we have expected range and the time column is in grouping
@@ -286,6 +287,7 @@ class RollupTool(BaseTool):
                         idx = (idx,)
                     row = {g: (None if pd.isna(val) else str(val)) for g, val in zip(valid_group_fields, idx)}
                     row["value"] = float(v)
+                    row["percent"] = float(v / total_val) if total_val > 0 else 0.0
                     rows.append(row)
             elif metric in ["age", "年龄", "平均年龄"] and "age" in df.columns:
                 age_num = pd.to_numeric(df["age"], errors="coerce")
@@ -313,6 +315,7 @@ class RollupTool(BaseTool):
                     row["value"] = round(float(v), 1)
                     rows.append(row)
             else:
+                total_val = len(df)
                 grouped = df.groupby(valid_group_fields, observed=True).size()
                 
                 if expected_time_range is not None and time_dim in valid_group_fields:
@@ -335,6 +338,7 @@ class RollupTool(BaseTool):
                         idx = (idx,)
                     row = {g: (None if pd.isna(val) else str(val)) for g, val in zip(valid_group_fields, idx)}
                     row["value"] = int(v)
+                    row["percent"] = float(v / total_val) if total_val > 0 else 0.0
                     rows.append(row)
         else:
             # Fallback

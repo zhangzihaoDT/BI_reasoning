@@ -166,6 +166,7 @@ You are NOT an analyst. You do NOT answer questions directly. You ONLY output JS
     - "锁单" -> {"field":"lock_time","op":"not_null","value":true}
 - rollup dimension allowed:
   - series, product_name, series_group, product_type, parent_region_name, store_city, store_name, first_middle_channel_name, gender, age_band
+  - If multiple dimensions requested (e.g. "by city by product"), use "dimensions": ["store_city", "product_name"].
 
 **Examples:**
 User: "昨日锁单数"
@@ -176,6 +177,9 @@ User: "LS9 2025年12月交付数"
 
 User: "LS9 2025年12月交付数 按城市"
 {{"tool":"rollup","parameters":{{"metric":"交付数","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS9"}}],"dimension":"store_city"}}}}
+
+User: "LS6 2025年12月锁单 按燃料类型和产品名称"
+{{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series_group","op":"=","value":"LS6"}}],"dimensions":["product_type", "product_name"]}}}}
 
 User: "LS6,LS9 2025年12月分别锁单多少"
 {{"tool":"rollup","parameters":{{"metric":"锁单量","date_range":"2025-12","filters":[{{"field":"series","op":"in","value":["LS6","LS9"]}}],"dimension":"series"}}}}
@@ -205,6 +209,38 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
 
         tool_name = extracted.get("tool") or "query"
         parameters = extracted.get("parameters") or {}
+        print(f"DEBUG: Extracted: {extracted}")
+
+        # Check for multiple dimensions and force rollup
+        p_dims = parameters.get("dimensions") or []
+        p_dim = parameters.get("dimension")
+        p_interval = parameters.get("interval")
+        
+        all_dims = set()
+        if p_dim:
+            all_dims.add(p_dim)
+        if isinstance(p_dims, list):
+            all_dims.update(p_dims)
+            
+        # If multiple spatial dimensions are present, force rollup tool
+        # because CompositionTool only supports single dimension breakdown
+        if len(all_dims) > 1:
+            tool_name = "rollup"
+            # Map interval to time dimension if we are switching to rollup
+            if p_interval:
+                if p_interval in ["day", "daily"]:
+                    all_dims.add("date")
+                elif p_interval in ["week", "weekly"]:
+                    all_dims.add("week")
+                elif p_interval in ["month", "monthly"]:
+                    all_dims.add("month")
+                elif p_interval in ["year", "yearly"]:
+                    all_dims.add("year")
+            
+            parameters["dimensions"] = list(all_dims)
+            # Clean up singular dimension to avoid confusion
+            if "dimension" in parameters:
+                del parameters["dimension"]
 
         # Post-process parameters to ensure population filters are applied for Age queries
         # This handles cases where LLM misses the instruction
@@ -302,23 +338,29 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
                     y, mo = m_month.groups()
                     date_range = f"{int(y):04d}-{int(mo):02d}"
 
-        dimension = None
+        dimensions = []
         if re.search(r"(按|分|各).*(大区)", q):
-            dimension = "parent_region_name"
-        elif re.search(r"(按|分|各).*(城市)", q):
-            dimension = "store_city"
-        elif re.search(r"(按|分|各).*(门店)", q):
-            dimension = "store_name"
-        elif re.search(r"(按|分|各).*(渠道)", q):
-            dimension = "first_middle_channel_name"
-        elif re.search(r"(按|分|各).*(产品|产品名称)", q):
-            dimension = "product_name"
-        elif re.search(r"(按|分|各).*(车型|车型分组|版本)", q):
-            dimension = "series_group"
-        elif re.search(r"(按|分|各).*(性别)", q):
-            dimension = "gender"
-        elif re.search(r"(按|分|各).*(年龄段|年龄)", q):
-            dimension = "age_band"
+            dimensions.append("parent_region_name")
+        if re.search(r"(按|分|各).*(城市)", q):
+            dimensions.append("store_city")
+        if re.search(r"(按|分|各).*(门店)", q):
+            dimensions.append("store_name")
+        if re.search(r"(按|分|各).*(渠道)", q):
+            dimensions.append("first_middle_channel_name")
+        if re.search(r"(按|分|各).*(产品|产品名称|productname|product_name)", q, re.IGNORECASE):
+            dimensions.append("product_name")
+        if re.search(r"(按|分|各).*(车型|车型分组|版本)", q):
+            dimensions.append("series_group")
+        if re.search(r"(按|分|各).*(性别)", q):
+            dimensions.append("gender")
+        if re.search(r"(按|分|各).*(年龄段|年龄)", q):
+            dimensions.append("age_band")
+        if re.search(r"(按|分|各).*(燃料|动力|fuel|type)", q, re.IGNORECASE):
+            dimensions.append("product_type")
+        
+        # Deduplicate
+        dimensions = list(set(dimensions))
+        dimension = dimensions[0] if dimensions else None
 
         filters = []
         try:
@@ -368,8 +410,12 @@ User: "2025年12月车型为 CM2 增程的锁单量?"
         if filters:
             parameters["filters"] = filters
         if tool == "rollup":
-            parameters["dimension"] = dimension
+            if len(dimensions) > 1:
+                parameters["dimensions"] = dimensions
+            else:
+                parameters["dimension"] = dimension
         if tool == "composition":
+            # Composition currently only supports single dimension
             parameters["dimension"] = dimension
             # Try to find interval
             if any(k in q for k in ["每天", "daily", "by day", "day"]):

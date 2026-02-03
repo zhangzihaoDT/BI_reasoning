@@ -46,10 +46,16 @@ class PlanningAgent:
     def generate_plan(self, query):
         if not self.api_key:
             return "Error: Deepseek API key not found in .env"
+        
+        import datetime
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
 
         system_prompt = f"""
 You are a senior Data Analyst Planning Agent. 
 Your goal is to translate a user's natural language business query into a structured "Evaluation Action Matrix" (DSL), strictly following the defined Planning Rules.
+
+**Current Context:**
+Today's Date: {today_str}
 
 **Context Resources:**
 

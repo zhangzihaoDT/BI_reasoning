@@ -72,7 +72,7 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 #### 产品与车型
 
 - `product_name`: 产品名称
-- `product_type`: 产品类型 (纯电/增程)
+- `product_type`: 燃料类型 / 动力形式 (纯电/增程) - 对应 query 中的 "燃料"、"动力"、"燃油" 等概念
 - `series_group`: 车型分组（派生维度，依据 [business_definition.json](file:///Users/zihao_/Documents/github/W52_reasoning/world/business_definition.json) 的 `series_group_logic` 生成）
 - `series`: 车型系列
 - `belong_intent_series`: 意向系列
@@ -123,7 +123,6 @@ source*report = "/Users/zihao*/Documents/coding/dataset/original/order_data_repo
 使用 `trend` 工具进行比较分析。
 
 - **短期趋势 (Short-term Trend)**
-
   - 环比前一日 (vs Previous Day)
   - 环比前一周 (vs Previous Week)
   - 环比前一月 (vs Previous Month)

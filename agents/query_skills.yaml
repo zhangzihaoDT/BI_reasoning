@@ -46,7 +46,7 @@ dimensions:
     filter_field: series_group
 
   - name: product_type
-    aliases: [动力类型, 能源类型, type, product_type_logic]
+    aliases: [动力类型, 能源类型, 燃料类型, 燃料, 动力, type, product_type_logic]
     values: [增程, 纯电]
     filter_field: product_type
 
